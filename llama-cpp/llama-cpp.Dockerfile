@@ -1,10 +1,47 @@
-FROM nvidia/cuda:13.1.0-devel-ubuntu24.04 AS build
-WORKDIR /app
-RUN apt-get update && apt-get install -y git cmake build-essential libcurl4-openssl-dev
-RUN git clone https://github.com/ggml-org/llama.cpp .
-RUN cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_CUDA_ARCHITECTURES=121a-real && \
-    cmake --build build --config Release -j$(nproc)
+# Must use 13.1 so the compiler understands architecture "121"
+FROM nvidia/cuda:13.1.0-devel-ubuntu24.04 AS builder
 
+# 1. Install prerequisites
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Fix the Sbsa ARM64 stubs by creating the missing .1 link inside the NVIDIA targets folder
+RUN cd /usr/local/cuda/targets/sbsa-linux/lib/stubs && ln -sf libcuda.so libcuda.so.1
+ENV LIBRARY_PATH=/usr/local/cuda/targets/sbsa-linux/lib/stubs:$LIBRARY_PATH
+
+WORKDIR /app
+RUN git clone https://github.com/ggml-org/llama.cpp src
+
+# 3. Build for Spark GB10 (Architecture 121)
+# The EXE_LINKER_FLAGS force the secondary compilation phase to find the CUDA stubs
+RUN cd src && mkdir build && cd build && \
+    cmake .. \
+    -DGGML_CUDA=ON \
+    -DCMAKE_CUDA_ARCHITECTURES="121" \
+    -DLLAMA_CURL=OFF \
+    -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link=/usr/local/cuda/targets/sbsa-linux/lib/stubs" \
+    && make -j$(nproc)
+
+# 4. Clean Runtime Stage
 FROM nvidia/cuda:13.1.0-runtime-ubuntu24.04
-COPY --from=build /app/build/bin/llama-server /app/llama-server
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libgomp1 \
+    libcurl4 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the compiled binary from the "src" folder
+COPY --from=builder /app/src/build/bin/llama-server /app/llama-server
+
+# Expose the port we defined in our docker-compose.yml
+EXPOSE 19000
+
+# Set the entrypoint
 ENTRYPOINT ["/app/llama-server"]
