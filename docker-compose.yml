@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # 1. vLLM (Primary Speed Engine) - Port 18000
+  vllm:
+    image: ghcr.io/${GH_USER}/vllm-spark:latest
+    container_name: vllm
+    restart: unless-stopped
+    ipc: host
+    ports:
+      - "18000:8000"
+    volumes:
+      - ${LLM_ROOT_PATH}/safetensors:/model
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+    environment:
+      - VLLM_ATTENTION_BACKEND=FLASHINFER
+    command: >
+      --model /model/Qwen3.5-7B-Instruct --host 0.0.0.0 --port 8000
+    networks: [dgx_net]
+
+  # 2. LLAMA-SERVER (GGUF Engine) - Port 19000
+  llama-server:
+    image: ghcr.io/${GH_USER}/llama-cpp-spark:latest
+    container_name: llama-cpp
+    ports: ["19000:19000"]
+    ulimits: { memlock: -1, stack: 67108864 }
+    volumes:
+      - ${LLM_ROOT_PATH}/llama:/models
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+    command: --host 0.0.0.0 --port 19000 --models-dir /models --n-gpu-layers 99
+    networks: [dgx_net]
+
+  # 3. LLAMA-SWAP (VRAM Orchestrator) - Port 28080
+  llama-swap:
+    image: ghcr.io/${GH_USER}/llama-swap-spark:latest
+    container_name: llama-swap
+    network_mode: host
+    volumes:
+      - ${REPO_CONFIG_PATH}/llama-swap/config.yaml:/app/config.yaml
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # 4. OLLAMA - Port 11434
+  ollama:
+    image: ghcr.io/${GH_USER}/ollama-spark:latest
+    container_name: ollama
+    ports: ["11434:11434"]
+    volumes:
+      - ${LLM_ROOT_PATH}/ollama:/root/.ollama
+    networks: [dgx_net]
+
+  # 5. LITELLM GATEWAY - Port 14000
+  litellm:
+    image: ghcr.io/${GH_USER}/litellm-spark:latest
+    container_name: litellm
+    network_mode: host
+    depends_on: [litellm-db]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+    volumes:
+      - ${REPO_CONFIG_PATH}/LiteLLM/config.yaml:/app/config.yaml
+    command: ["--config", "/app/config.yaml", "--port", "14000"]
+
+  # 6. LITELLM DATABASE - Port 15432
+  litellm-db:
+    image: postgres:15-alpine
+    container_name: litellm-postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports: ["15432:5432"]
+    networks: [dgx_net]
+
+networks:
+  dgx_net:
+    external: true
+
+volumes:
+  litellm_db_data:
