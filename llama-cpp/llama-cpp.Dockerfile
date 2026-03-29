@@ -17,7 +17,6 @@ WORKDIR /app
 RUN git clone https://github.com/ggml-org/llama.cpp src
 
 # 3. Build for Spark GB10 (Architecture 121)
-# The EXE_LINKER_FLAGS force the secondary compilation phase to find the CUDA stubs
 RUN cd src && mkdir build && cd build && \
     cmake .. \
     -DGGML_CUDA=ON \
@@ -37,11 +36,12 @@ RUN apt-get update && apt-get install -y \
     libcurl4 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the compiled binary from the "src" folder
+# --- THE FIX --- 
+# Copy the compiled binary AND all the required shared libraries (*.so)
 COPY --from=builder /app/src/build/bin/llama-server /app/llama-server
+COPY --from=builder /app/src/build/bin/*.so* /usr/lib/
 
-# Expose the port we defined in our docker-compose.yml
-EXPOSE 19000
+# Expose the new port
+EXPOSE 18080
 
-# Set the entrypoint
 ENTRYPOINT ["/app/llama-server"]
