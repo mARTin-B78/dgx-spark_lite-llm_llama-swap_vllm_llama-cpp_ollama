@@ -1,0 +1,69 @@
+name: Scheduled Spark GB10 Build
+
+on:
+  schedule:
+    - cron: '0 2 * * 0' # Every Sunday at 2 AM
+  workflow_dispatch:   # Manual trigger
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 1. LLAMA.CPP
+      - name: Build llama-cpp-spark
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./llama-cpp/llama-cpp.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.actor }}/llama-cpp-spark:latest
+
+      # 2. LLAMA-SWAP
+      - name: Build llama-swap-spark
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./llama-swap/llama-swap.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.actor }}/llama-swap-spark:latest
+
+      # 3. LITELLM
+      - name: Build LiteLLM-spark
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./LiteLLM/litellm.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.actor }}/litellm-spark:latest
+
+      # 4. OLLAMA
+      - name: Build Ollama-spark
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./ollama/ollama.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.actor }}/ollama-spark:latest
+
+      # 5. vLLM (Spark Optimized)
+      - name: Build vLLM-spark
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./vllm/vllm.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.actor }}/vllm-spark:latest

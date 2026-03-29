@@ -1,0 +1,31 @@
+name: Build and Publish Spark Images
+
+on:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-llama-cpp:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push llama-cpp-spark
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: llama-cpp.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.actor }}/llama-cpp-spark:latest

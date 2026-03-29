@@ -1,0 +1,6 @@
+.env
+.env~
+*~
+*.swp
+*.log
+.DS_Store
