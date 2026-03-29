@@ -3,9 +3,10 @@ name: Build and Publish Spark Images
 on:
   push:
     branches: [ "main", "master" ]
+  workflow_dispatch: # Allows you to trigger this manually from the Actions tab
 
 jobs:
-  build-llama-cpp:
+  build-and-push-all:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,10 +23,47 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 1. LLAMA.CPP
       - name: Build and push llama-cpp-spark
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: llama-cpp.Dockerfile
+          file: ./llama-cpp/llama-cpp.Dockerfile
           push: true
           tags: ghcr.io/${{ github.actor }}/llama-cpp-spark:latest
+
+      # 2. VLLM
+      - name: Build and push vllm-spark
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./vllm/vllm.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.actor }}/vllm-spark:latest
+
+      # 3. LLAMA-SWAP
+      - name: Build and push llama-swap-spark
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./llama-swap/llama-swap.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.actor }}/llama-swap-spark:latest
+
+      # 4. OLLAMA
+      - name: Build and push ollama-spark
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./ollama/ollama.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.actor }}/ollama-spark:latest
+
+      # 5. LITELLM
+      - name: Build and push litellm-spark
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./LiteLLM/litellm.Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.actor }}/litellm-spark:latest
