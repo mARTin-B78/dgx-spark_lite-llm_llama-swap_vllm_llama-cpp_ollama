@@ -1,5 +1,10 @@
+# --- Security & Secrets ---
 .env
 .env~
+LiteLLM/config.yaml
+llama-swap/config.yaml
+
+# --- Backup/Temp Files ---
 *~
 *.swp
 *.log
