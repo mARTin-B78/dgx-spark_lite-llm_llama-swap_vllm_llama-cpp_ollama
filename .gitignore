@@ -3,9 +3,19 @@
 .env~
 LiteLLM/config.yaml
 llama-swap/config.yaml
+openclaw/
+
+# --- Build Artifacts & Output ---
+vllm/build/
+test-results/
+
+# --- IDE & Tool Config ---
+.claude/
 
 # --- Backup/Temp Files ---
 *~
 *.swp
 *.log
 .DS_Store
+*klappt nicht so ganz*
+*.gemini.created

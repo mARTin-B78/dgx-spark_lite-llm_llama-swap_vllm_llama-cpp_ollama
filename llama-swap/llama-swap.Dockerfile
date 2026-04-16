@@ -1,3 +1,5 @@
+# lama-swap.Dockerfile
+
 FROM ubuntu:22.04
 
 # Install dependencies AND docker.io so llama-swap can manage containers

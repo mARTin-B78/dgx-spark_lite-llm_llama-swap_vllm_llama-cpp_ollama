@@ -1,3 +1,4 @@
+# vllm.Dockerfile
 # Optimized vLLM for DGX Spark (GB10)
 FROM nvidia/cuda:13.1.0-devel-ubuntu24.04 AS build
 
