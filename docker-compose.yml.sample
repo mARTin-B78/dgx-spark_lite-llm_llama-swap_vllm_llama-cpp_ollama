@@ -1,0 +1,206 @@
+version: '3.8'
+
+# ==============================================================================
+# DGX SPARK / GRACE-BLACKWELL OPTIMIZED AI ORCHESTRATION STACK
+# Rename this file to `docker-compose.yml` and replace <PLACEHOLDERS>
+# ==============================================================================
+
+services:
+  # ==========================================
+  # 1. LLAMA.CPP (The Persistent GGUF Engine)
+  # ==========================================
+  llama-server:
+    image: ghcr.io/martin-b78/llama-cpp-spark:latest
+    container_name: llama.cpp
+    restart: unless-stopped  
+
+    # --- FIX 1: UNLOCK MEMORY (Required for GB10/Unified Memory) ---
+    ulimits:
+      memlock: -1       # Allow unlimited memory locking (Critical)
+      stack: 67108864   # Increase stack size to avoid segfaults
+      
+    # --- FIX 2: DIRECT MEMORY ACCESS ---
+    ipc: host           # Allows sharing memory directly with host
+    security_opt:
+      - seccomp:unconfined # Disables strict security filters that block GPU calls
+    # ---------------------------------------------------------------
+    
+    ports:
+      - "18080:18080"
+      
+    volumes:
+      # Maps your local models folder to the container
+      - ./models/ollama:/models/ollama
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+              
+    environment:
+      - GGML_CUDA_ENABLE_UNIFIED_MEMORY=1 # Vital for Spark's 128GB Unified Memory
+      
+    command: 
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "18080"
+      - --parallel
+      - "4"
+      - --no-mmap
+      - --context-shift
+      - --models-dir
+      - /models/ollama
+      - --chat-template
+      - chatml
+      - --n-gpu-layers
+      - "99"
+      - --models-max
+      - "1"
+      - --ctx-size
+      - "16384"
+      - --timeout
+      - "600"
+
+    stdin_open: true      # Equivalent to -i
+    tty: true             # Equivalent to -t     
+    
+    networks:
+      - dgx_net
+
+  # ==========================================
+  # 2. OLLAMA (The General Model Manager)
+  # ==========================================
+  ollama:
+    image: ghcr.io/martin-b78/ollama-spark:latest    
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./models/ollama:/root/.ollama
+      
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]    
+              
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_NUM_PARALLEL=1
+      - OLLAMA_LLM_LIBRARY=cuda_v13  
+      - OLLAMA_DEBUG=1               
+
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    networks:
+      - dgx_net
+
+  # ==========================================
+  # 3. LLAMA-SWAP (The VRAM Manager)
+  # ==========================================
+  llama-swap:
+    image: ghcr.io/martin-b78/llama-swap-spark:latest
+    container_name: llama-swap
+    restart: unless-stopped
+    
+    ports:
+      - "28080:8080" 
+      
+    entrypoint: ["/usr/bin/llama-swap", "-config", "/app/config.yaml", "-listen", "0.0.0.0:8080"]
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      
+    volumes:
+      - ./llama-swap/config.yaml:/app/config.yaml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker
+      - ./models:/models
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - GITHUB_TOKEN=<YOUR_GITHUB_TOKEN> # CHANGE ME (Required to pull models if using GHCR)
+    networks:
+      - dgx_net
+
+  # ==========================================
+  # 4. LITELLM DATABASE (PostgreSQL)
+  # ==========================================
+  litellm-db:
+    image: postgres:15-alpine
+    container_name: litellm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm_admin
+      POSTGRES_PASSWORD: <YOUR_POSTGRES_PASSWORD> # CHANGE ME
+    ports:
+      - "15432:5432" 
+    volumes:
+      - litellm_db_data:/var/lib/postgresql/data 
+    networks:
+      - dgx_net
+
+  # ==========================================
+  # 5. LITELLM (The API Gateway)
+  # ==========================================
+  litellm:
+    image: ghcr.io/martin-b78/litellm-spark:latest
+    container_name: litellm
+    restart: unless-stopped
+    depends_on:
+      - litellm-db
+      
+    ports:
+      - "14000:4000" # Map external 14000 to internal 4000
+      
+    environment:
+      - DATABASE_URL=postgresql://litellm_admin:<YOUR_POSTGRES_PASSWORD>@litellm-db:5432/litellm # MATCH DB PASSWORD ABOVE
+      - LITELLM_MASTER_KEY=<YOUR_LITELLM_MASTER_KEY> # CHANGE ME
+
+    volumes:
+      - ./LiteLLM/config.yaml:/app/config.yaml
+      
+    command: 
+      - "--config" 
+      - "/app/config.yaml" 
+      - "--port"
+      - "4000" 
+
+    networks:
+      - dgx_net
+
+# ==========================================
+# GLOBAL NETWORKS & VOLUMES
+# ==========================================
+networks:
+  dgx_net:
+    external: true
+
+volumes:
+  litellm_db_data:

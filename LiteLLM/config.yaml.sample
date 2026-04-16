@@ -1,0 +1,183 @@
+# LITELLM config.yaml.sample
+# Rename this file to config.yaml and replace all <PLACEHOLDERS> with your own secure values.
+
+general_settings:
+  # ===================================================
+  # 🛡️ SECURITY & ADMIN UI
+  # ===================================================
+  master_key: "<YOUR_LITELLM_MASTER_KEY>" 
+  ui_username: "<YOUR_ADMIN_USERNAME>"
+  ui_password: "<YOUR_ADMIN_PASSWORD>"
+  ui_access_mode: "admin_only"
+  disable_master_key_return: true
+  allow_model_creation: false
+
+globalTTL: 600 # Keep all models alive for 10 minutes (600s) of idle time
+
+model_list:
+  # ===================================================
+  # 🦙 LLAMA-CPP MODELS (DGX Local)
+  # ===================================================
+
+  - model_name: Nemotron3-Nano-4B-Q4_K_M-GGUF
+    litellm_params:
+      model: openai/Nemotron3-Nano-4B-Q4_K_M-GGUF 
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+
+  - model_name: GLM-Steam-106B-A12B-v1-Q4_K_M-GGUF
+    litellm_params:
+      model: openai/TheDrummer_GLM-Steam-106B-A12B-v1-Q4_K_M-GGUF
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+
+  - model_name: Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF
+    litellm_params:
+      model: openai/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-GGUF # This is what is sent to llama-swap
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+      max_tokens: 4096
+
+  # ===================================================
+  # 🦙 LLAMA-SWAP MODELS (DGX Local)
+  # ===================================================
+
+  # --- Qwen 3.5 Series (Native Reasoning) ---
+  - model_name: Qwen3.5-35B-A3B-FP8
+    litellm_params:
+      model: openai/Qwen3.5-35B-A3B-FP8
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>" 
+      drop_params: true
+      include_reasoning: true 
+      supports_reasoning: true
+      # This ensures the <think> tags stay in the text stream
+      merge_reasoning_content_in_choices: false
+      extra_body:
+        enable_thinking: true  # Specific for Qwen 3.5 vLLM deployments
+        chat_template_kwargs: {"enable_thinking": true}
+      max_tokens: 4096 
+
+  # --- Qwen 3.5 Series (Heavy thinker Reasoning) ---
+  - model_name: Qwen3.5-122B-A10B-int4-AutoRound
+    litellm_params:
+      model: openai/Qwen3.5-122B-A10B-int4-AutoRound
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+      include_reasoning: true 
+      supports_reasoning: true
+      merge_reasoning_content_in_choices: false
+      max_tokens: 4096 
+
+  # --- Qwen 3 Series (Omni & Coder Reasoning)(Thinking-based multimodal) ---
+  - model_name: Qwen3-Omni-30B-A3B-Instruct
+    litellm_params:
+      model: openai/Qwen3-Omni-30B-A3B-Instruct
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+      include_reasoning: true 
+      supports_reasoning: true
+      merge_reasoning_content_in_choices: false
+
+  - model_name: Qwen3-Coder-Next-int4-AutoRound
+    litellm_params:
+      model: openai/Qwen3-Coder-Next-int4-AutoRound
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+      merge_reasoning_content_in_choices: false
+
+  # --- Qwen 3 Series Vision Model is for Visual Stuff with Pictures ---
+  - model_name: Qwen3-VL-30B-A3B-Instruct-FP8
+    litellm_params:
+      model: openai/Qwen3-VL-30B-A3B-Instruct-FP8
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+      include_reasoning: false
+      supports_reasoning: false
+
+  # --- NVIDIA Nemotron-3 (Instant is for Speed Orchestrator & Fast Chat) ---
+  - model_name: Nemotron-3-Nano-4B-FP8
+    litellm_params:
+      model: openai/Nemotron-3-Nano-4B-FP8
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+      drop_params: true
+
+  # --- NVIDIA Nemotron (Hybrid Reasoning Trace) ---
+  - model_name: Nemotron-3-Nano-30B-A3B-NVFP4
+    litellm_params:
+      model: openai/Nemotron-3-Nano-30B-A3B-NVFP4
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+      include_reasoning: true 
+      supports_reasoning: true
+      # Merges the <think> blocks so the UI doesn't break
+      merge_reasoning_content_in_choices: true
+
+  # --- NVIDIA Nemotron-3 Super (Advanced 120B Reasoning & CUTLASS Speed) ---
+  - model_name: Nemotron-3-Super-120B-A12B-NVFP4
+    litellm_params:
+      model: openai/Nemotron-3-Super-120B-A12B-NVFP4
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+      include_reasoning: true
+      supports_reasoning: true
+      merge_reasoning_content_in_choices: false
+      max_tokens: 8192 
+
+  # --- OpenAI GPT-OSS (Advanced Reasoning Depth - Uses OpenAI-style reasoning)---
+  - model_name: GPT-OSS-120B
+    litellm_params:
+      model: openai/GPT-OSS-120B
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+      include_reasoning: true 
+      supports_reasoning: true
+      merge_reasoning_content_in_choices: false
+
+  # --- Mistral (Strong Logic, but usually skips <think> tags) ---
+  - model_name: Mistral-Small-24B-Instruct-2501
+    litellm_params:
+      model: openai/Mistral-Small-24B-Instruct-2501
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+      # Usually a standard chat model, but very capable. 
+      # Keep these false unless you force tags in the system prompt.
+      include_reasoning: false
+      supports_reasoning: false
+      merge_reasoning_content_in_choices: false
+
+  # ===================================================
+  # 🎭 CLAUDE CODE COMPATIBILITY LAYER
+  # ===================================================
+  - model_name: claude-3-5-sonnet-20241022
+    litellm_params:
+      model: openai/GLM-4.6-derestricted
+      api_base: "http://ollama:11434"
+      api_key: "<YOUR_OLLAMA_API_KEY>"
+
+  - model_name: qwen-3-coder-30b-fp8
+    litellm_params:
+      model: openai/Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+      api_base: "http://ollama:11434/v1" 
+      api_key: "<YOUR_OLLAMA_API_KEY>"
+      drop_params: true
+
+  # ===================================================
+  # 🦙 OLLAMA (Local & Proxy)
+  # ===================================================
+  - model_name: dolphin-mistral-24b
+    litellm_params:
+      model: openai/ikiru/dolphin-mistral-24b-venice-edition:latest
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "<YOUR_LLAMA_SWAP_API_KEY>"
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  request_timeout: 900
+  merge_reasoning_content_in_choices: false
+  stream: true 
+  stream_timeout: 0.01
+
+# database_url: "postgresql://litellm_admin:<YOUR_POSTGRES_PASSWORD>@litellm-db:5432/litellm"

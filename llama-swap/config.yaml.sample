@@ -1,0 +1,354 @@
+# llama-swap config.yaml.sample
+# Rename this file to config.yaml and replace <PLACEHOLDERS> with your own values.
+
+host: "0.0.0.0"
+port: 8080
+timeout: 3600
+readyTimeout: 3600
+healthCheckTimeout: 300
+logLevel: "info" 
+metricsMaxInMemory: 1000
+
+# Global macros for cleaner model blocks and easy customization
+macros:
+  host: "0.0.0.0"
+  gpu_mem: "0.7"
+  tp: "1" 
+  hf_cache: "~/.cache/huggingface"          # <--- Users set their HuggingFace cache path here
+  gguf_models: "./models/ollama"            # <--- Users set their local GGUF folder path here
+  vllm_image: "spark-vllm:Version_1"        # <--- Base spark vLLM image (recommended to use the one from https://github.com/eugr/spark-vllm-docker)
+  vllm_node: "vllm-node:Version_1"          # <--- Standard vLLM node image with tf5
+
+models:
+  # ========================================================================
+  # LLAMA.CPP GGUF MODELS (Dockerized) - Unified Memory Optimized
+  # ========================================================================
+
+  TheDrummer_GLM-Steam-106B-A12B-v1-Q4_K_M-GGUF:
+    ttl: 3600
+    readyTimeout: 1200
+    checkEndpoint: "/health" 
+    cmd: >
+      docker run --rm --name llamacpp-glm-${PORT}
+      --runtime nvidia --gpus all --ipc host --network container:llama-swap
+      --ulimit memlock=-1 --ulimit stack=67108864
+      --security-opt seccomp=unconfined
+      -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+      -v ${gguf_models}:/models/ollama
+      ghcr.io/martin-b78/llama-cpp-spark:latest
+      -m /models/ollama/TheDrummer_GLM-Steam-106B-A12B-v1-Q4_K_M-00001-of-00002.gguf
+      --port ${PORT} --host ${host}
+      --ctx-size 8192 --n-gpu-layers 99 --parallel 4 --no-mmap
+    cmdStop: "docker stop llamacpp-glm-${PORT}"
+
+  Nemotron3-Nano-4B-Q4_K_M-GGUF:
+    ttl: 300
+    readyTimeout: 300
+    checkEndpoint: "/health" 
+    cmd: >
+      docker run --rm --name llamacpp-nano-${PORT}
+      --runtime nvidia --gpus all --ipc host --network container:llama-swap
+      -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+      -v ${gguf_models}:/models/ollama
+      ghcr.io/martin-b78/llama-cpp-spark:latest
+      -m /models/ollama/NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf
+      --port ${PORT} --host 0.0.0.0
+      --ctx-size 8192 --n-gpu-layers 99 --parallel 1 --no-mmap
+    cmdStop: "docker stop llamacpp-nano-${PORT}"
+
+  Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-GGUF:
+    ttl: 600
+    readyTimeout: 300
+    checkEndpoint: "/health" 
+    cmd: >
+      docker run --rm --name llamacpp-qwen-${PORT}
+      --runtime nvidia --gpus all --ipc host --network container:llama-swap
+      --ulimit memlock=-1 --ulimit stack=67108864
+      --security-opt seccomp=unconfined
+      -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+      -v ${gguf_models}:/models/ollama
+      ghcr.io/martin-b78/llama-cpp-spark:latest
+      -m /models/ollama/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf
+      --port ${PORT} --host ${host}
+      --ctx-size 16384 --n-gpu-layers 99 --parallel 4 --no-mmap
+    cmdStop: "docker stop llamacpp-qwen-${PORT}"
+
+  # ========================================================================
+  # OLLAMA DYNAMIC CONTAINERS
+  # ========================================================================
+
+  "ikiru/dolphin-mistral-24b-venice-edition:latest":
+    ttl: 600
+    checkEndpoint: "/"
+    cmd: >
+      docker run --rm --name ollama-dolphin-${PORT} 
+      --runtime nvidia --gpus all --network container:llama-swap 
+      -e OLLAMA_HOST=0.0.0.0:${PORT} 
+      -v ${gguf_models}:/root/.ollama 
+      ollama/ollama:latest
+      serve
+    cmdStop: "docker stop ollama-dolphin-${PORT}"
+
+  # ========================================================================
+  # VLLM MODELS (Dynamically spun up - HuggingFace Cache Configured)
+  # ========================================================================
+
+  # --- Fast General Text Prompts ---
+  Qwen3.5-35B-A3B-FP8:
+    ttl: 600
+    cmd: >
+      docker run --rm --name vllm-qwen3.5-35b-${PORT} 
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e VLLM_MARLIN_USE_ATOMIC_ADD=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface 
+      -v ./vllm/build/spark-vllm-docker/mods/fix-qwen3.5-chat-template/chat_template.jinja:/models/vllm/custom_template.jinja:ro
+      ${vllm_node}
+      vllm serve Qwen/Qwen3.5-35B-A3B-FP8
+      --served-model-name Qwen3.5-35B-A3B-FP8
+      --host 0.0.0.0 --port ${PORT}
+      --gpu-memory-utilization 0.7
+      --max-model-len 131072
+      --max-num-seqs 16
+      --enforce-eager
+      --max-num-batched-tokens 4096
+      --kv-cache-dtype fp8
+      --attention-backend flashinfer
+      --enable-prefix-caching
+      --chat-template /models/vllm/custom_template.jinja
+      --tensor-parallel-size 1
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+    cmdStop: "docker stop vllm-qwen3.5-35b-${PORT}"
+
+  # --- Heavy Thinker Reasoning ---
+  Qwen3.5-122B-A10B-int4-AutoRound:
+    ttl: 3600
+    readyTimeout: 1800
+    cmd: >
+      docker run --rm --name vllm-qwen3.5-122b-${PORT} 
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface 
+      vllm-node-tf5:latest
+      vllm serve Qwen/Qwen3.5-122B-A10B-int4-AutoRound
+      --served-model-name Qwen3.5-122B-A10B-int4-AutoRound
+      --host ${host} --port ${PORT}
+      --gpu-memory-utilization 0.75
+      --tensor-parallel-size ${tp}
+      --max-model-len 40960
+      --trust-remote-code
+      --enforce-eager
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+    cmdStop: "docker stop vllm-qwen3.5-122b-${PORT}"
+
+  # --- Visual Stuff with Pictures ---
+  Qwen3-VL-30B-A3B-Instruct-FP8:
+    ttl: 600 
+    cmd: >
+      docker run --rm --name vllm-qwen3-vl-${PORT} 
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface 
+      ${vllm_image} 
+      python3 -m vllm.entrypoints.openai.api_server
+      --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+      --served-model-name Qwen3-VL-30B-A3B-Instruct-FP8
+      --host 0.0.0.0 --port ${PORT}
+      --max-model-len 32768
+      --gpu-memory-utilization 0.60
+      --trust-remote-code
+      --limit-mm-per-prompt '{"image": 2}'
+      --kv-cache-dtype fp8
+      --enable-prefix-caching
+      --tensor-parallel-size 1
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+    cmdStop: "docker stop vllm-qwen3-vl-${PORT}"
+
+  # --- Pictures, Sound, Text ---
+  Qwen3-Omni-30B-A3B-Instruct:
+    ttl: 600 
+    cmd: >
+      docker run --rm --name vllm-qwen3-omni-${PORT} 
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface 
+      ${vllm_node} 
+      vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct
+      --served-model-name Qwen3-Omni-30B-A3B-Instruct
+      --host ${host} --port ${PORT}
+      --max-model-len 32768
+      --gpu-memory-utilization 0.75
+      --trust-remote-code
+      --limit-mm-per-prompt '{"image": 2, "audio": 2}'
+      --enable-prefix-caching
+      --tensor-parallel-size ${tp}
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder 
+    cmdStop: "docker stop vllm-qwen3-omni-${PORT}"
+
+  # --- Coding (With Custom Patch Script Mount) ---
+  Qwen3-Coder-Next-int4-AutoRound:
+    ttl: 3600
+    readyTimeout: 1200
+    cmd: >
+      docker run --rm --name vllm-qwen3-coder-${PORT}
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e VLLM_MARLIN_USE_ATOMIC_ADD=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface
+      -v ./vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro
+      --entrypoint /bin/bash
+      ${vllm_image}
+      -c "cp -a /mod/* /usr/local/lib/python3.12/dist-packages/ 2>/dev/null || true && python3 -m vllm.entrypoints.openai.api_server --model Qwen/Qwen3-Coder-Next-int4-AutoRound --served-model-name Qwen3-Coder-Next-int4-AutoRound --host 0.0.0.0 --port ${PORT} --gpu-memory-utilization 0.85 --max-model-len 32768 --trust-remote-code --dtype bfloat16 --enforce-eager --enable-auto-tool-choice --tool-call-parser qwen3_coder --tensor-parallel-size 1"
+    cmdStop: "docker stop vllm-qwen3-coder-${PORT}"
+
+  # --- Instant Orchestrator - Blackwell Optimized FP8 ---
+  Nemotron-3-Nano-4B-FP8:
+    ttl: 300
+    readyTimeout: 300
+    checkEndpoint: "/health" 
+    cmd: >
+      docker run --rm --name vllm-nano4b-${PORT}
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface
+      ${vllm_image}
+      vllm serve nvidia/Nemotron-3-Nano-4B-FP8
+      --served-model-name Nemotron-3-Nano-4B-FP8
+      --host 0.0.0.0 --port ${PORT}
+      --gpu-memory-utilization 0.5
+      --max-model-len 8192
+      --kv-cache-dtype fp8
+      --enforce-eager
+      --trust-remote-code
+      --enable-prefix-caching
+      --tool-call-parser qwen3_coder
+    cmdStop: "docker stop vllm-nano4b-${PORT}"
+
+  # --- Fast General Text/Chat ---
+  Nemotron-3-Nano-30B-A3B-NVFP4:
+    ttl: 300
+    readyTimeout: 600
+    cmd: >
+      docker run --rm --name vllm-nemotron-${PORT} 
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface 
+      ${vllm_node} 
+      python3 -m vllm.entrypoints.openai.api_server
+      --model nvidia/Nemotron-3-Nano-30B-A3B-NVFP4
+      --served-model-name Nemotron-3-Nano-30B-A3B-NVFP4
+      --host 0.0.0.0 --port ${PORT} 
+      --gpu-memory-utilization 0.65
+      --max-model-len 2048
+      --kv-cache-dtype fp8
+      --enforce-eager
+      --trust-remote-code
+      --quantization modelopt_fp4
+    cmdStop: "docker stop vllm-nemotron-${PORT}"
+
+  # --- NVIDIA Nemotron-3 Super (120B MoE - Blackwell Optimized NVFP4) ---
+  Nemotron-3-Super-120B-A12B-NVFP4:
+    ttl: 3600          
+    readyTimeout: 1800 
+    cmd: >
+      docker run --rm --name vllm-nemotron-super-${PORT}
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap --shm-size=64g
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e VLLM_FLASHINFER_ALLREDUCE_BACKEND=trtllm
+      -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface
+      ${vllm_image}
+      vllm serve nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+      --served-model-name Nemotron-3-Super-120B-A12B-NVFP4
+      --host 0.0.0.0 --port ${PORT}
+      --gpu-memory-utilization 0.7
+      --tensor-parallel-size ${tp}
+      --max-model-len 262144
+      --max-num-seqs 10
+      --kv-cache-dtype fp8
+      --moe-backend cutlass
+      --trust-remote-code
+      --enable-prefix-caching
+      --tool-call-parser qwen3_coder
+      --mamba_ssm_cache_dtype float32
+      --attention-backend TRITON_ATTN
+      --distributed-executor-backend ray
+    cmdStop: "docker stop vllm-nemotron-super-${PORT}"
+
+  # --- Text based stuff and Coding ---
+  GPT-OSS-120B:
+    ttl: 3600
+    readyTimeout: 1200
+    cmd: >
+      docker run --rm --name vllm-gptoss-${PORT} 
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface 
+      vllm-node-mxfp4
+      vllm serve openai/gpt-oss-120b
+      --served-model-name GPT-OSS-120B
+      --host ${host} --port ${PORT}
+      --gpu-memory-utilization 0.7
+      --tensor-parallel-size ${tp}
+      --quantization mxfp4
+      --kv-cache-dtype fp8
+      --max-num-batched-tokens 8192
+      --enable-prefix-caching
+      --tool-call-parser openai
+      --enable-auto-tool-choice
+    cmdStop: "docker stop vllm-gptoss-${PORT}"
+
+  # --- Fast Roleplay or Text based Stuff ---
+  Mistral-Small-24B-Instruct-2501:
+    ttl: 600
+    cmd: >
+      docker run --rm --name vllm-mistral-small-${PORT} 
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface 
+      ${vllm_node}
+      vllm serve mistralai/Mistral-Small-24B-Instruct-2501
+      --served-model-name Mistral-Small-24B-Instruct-2501
+      --host ${host} --port ${PORT}
+      --gpu-memory-utilization ${gpu_mem}
+      --max-model-len 32768
+      --trust-remote-code
+      --tensor-parallel-size ${tp}
+      --enforce-eager
+      --tool-call-parser mistral
+    cmdStop: "docker stop vllm-mistral-small-${PORT}"
+
+  # --- MiniMax (Work in Progress / Requires GB10 resources) ---
+  MiniMax-M2.5-REAP-172B-A10B-NVFP4-GB10:
+    ttl: 600
+    cmd: >
+      docker run --rm --name vllm-minimax-${PORT} 
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap --shm-size=64g
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -e HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
+      -v ${hf_cache}:/root/.cache/huggingface 
+      ${vllm_node}
+      vllm serve MiniMax/MiniMax-M2.5-REAP-172B-A10B-NVFP4-GB10
+      --served-model-name Minimax-M2.5-REAP-172B-A10B-NVFP4-GB10
+      --host ${host} --port ${PORT}
+      --gpu-memory-utilization ${gpu_mem}
+      --trust-remote-code
+      --tensor-parallel-size ${tp}
+      --quantization awq
+      --max-model-len 8192
+    cmdStop: "docker stop vllm-minimax-${PORT}"

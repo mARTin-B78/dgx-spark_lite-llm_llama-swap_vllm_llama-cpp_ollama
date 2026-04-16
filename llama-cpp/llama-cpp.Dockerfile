@@ -1,3 +1,4 @@
+# lama-cpp.Dockerfile
 # Must use 13.1 so the compiler understands architecture "121"
 FROM nvidia/cuda:13.1.0-devel-ubuntu24.04 AS builder
 
