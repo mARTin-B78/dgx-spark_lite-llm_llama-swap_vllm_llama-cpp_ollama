@@ -171,26 +171,40 @@ warmup_model() {
     local start end elapsed
     start=$(date +%s.%N)
 
-    local response
-    response=$(curl -s --max-time "$TIMEOUT" \
+    local response_file="/tmp/response_${TIMESTAMP}.json"
+    local http_code
+    http_code=$(curl -s -w "%{http_code}" -o "$response_file" --max-time "$TIMEOUT" \
         -X POST "$LLAMA_SWAP_URL/v1/chat/completions" \
         -H "Content-Type: application/json" \
         -d "$(jq -n --arg model "$model" '{
             model: $model,
-            messages: [{role: "user", content: "Say OK"}],
-            max_tokens: 5
-        }')" 2>&1) || true
+            messages: [{role: "user", content: "Write a short python hello world script."}],
+            max_tokens: 50
+        }')" 2>/dev/null) || http_code=0
 
     end=$(date +%s.%N)
     elapsed=$(echo "scale=1; $end - $start" | bc)
 
-    local err
-    err=$(echo "$response" | jq -r '.error.message // empty' 2>/dev/null)
-    if [[ -n "$err" ]]; then
-        log "  ${RED}FAILED to load: $err${NC}"
+    if [[ "$http_code" -ne 200 ]]; then
+        local err_msg
+        err_msg=$(jq -r '.error.message // empty' "$response_file" 2>/dev/null)
+        if [[ -n "$err_msg" ]]; then
+            log "  ${RED}FAILED to load: $err_msg (HTTP $http_code)${NC}"
+        else
+            log "  ${RED}FAILED to load (HTTP $http_code)${NC}"
+        fi
+        rm -f "$response_file"
         return 1
     fi
 
+    local content
+    content=$(jq -r '(.choices[0].message.reasoning // "") + (.choices[0].message.content // "")' "$response_file" 2>/dev/null | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [[ -z "$content" ]]; then
+        content="(Empty Response)"
+    fi
+    log "  Coherence check: ${CYAN}\"${content:0:150}\"${NC}"
+
+    rm -f "$response_file"
     log "  Model ready (loaded in ${elapsed}s)"
     return 0
 }
@@ -514,58 +528,22 @@ for MODEL in $MODELS; do
         # Extract numbers for final summary from JSON
         local_json="$RESULTS_DIR/${MODEL//\//_}_${TIMESTAMP}.json"
         if [[ -f "$local_json" ]]; then
-            eval "$(python3 <<PYEOF
-import json
-with open('$local_json') as f:
-    data = json.load(f)
-
-# Collect baseline (depth=0) and deepest results
-baseline_tg = None
-deepest_tg = None
-max_depth = 0
-
-for b in data.get('benchmarks', []):
-    depth = b.get('context_size', 0)
-    pp  = b.get('pp_throughput') or {}
-    tg  = b.get('tg_throughput') or {}
-    pk  = b.get('peak_throughput') or {}
-    e2e = b.get('e2e_ttft') or {}
-    pp_mean  = pp.get('mean', 0) or 0
-    pp_std   = pp.get('std', 0) or 0
-    tg_mean  = tg.get('mean', 0) or 0
-    tg_std   = tg.get('std', 0) or 0
-    pk_mean  = pk.get('mean', 0) or 0
-    e2e_mean = e2e.get('mean', 0) or 0
-
-    if pp_mean == 0 and tg_mean == 0:
-        continue
-
-    if depth == 0:
-        baseline_tg = tg_mean
-        # Use baseline for summary row
-        if pp_std > 0.5:
-            print(f"SUMMARY_PP['$MODEL']='{pp_mean:.0f} +/-{pp_std:.0f}'")
-        else:
-            print(f"SUMMARY_PP['$MODEL']='{pp_mean:.0f}'")
-        if tg_std > 0.5:
-            print(f"SUMMARY_TG['$MODEL']='{tg_mean:.1f} +/-{tg_std:.1f}'")
-        else:
-            print(f"SUMMARY_TG['$MODEL']='{tg_mean:.1f}'")
-        print(f"SUMMARY_PEAK['$MODEL']='{pk_mean:.0f}'")
-        if e2e_mean > 0:
-            print(f"SUMMARY_TTFT['$MODEL']='{e2e_mean:.0f}'")
-
-    if depth > max_depth:
-        max_depth = depth
-        deepest_tg = tg_mean
-
-# Calculate degradation
-if baseline_tg and deepest_tg and baseline_tg > 0 and max_depth > 0:
-    pct = ((deepest_tg - baseline_tg) / baseline_tg) * 100
-    print(f"SUMMARY_DEGRADATION['$MODEL']='{pct:+.1f}% @{max_depth//1024}k'")
-
-PYEOF
-            )" 2>/dev/null
+            # Extract metrics using jq for the summary table
+            # We look for depth 0 (baseline) and the deepest result
+            baseline_tg=$(jq -r '.benchmarks[] | select(.context_size == 0) | .tg_throughput.mean // empty' "$local_json" | head -n1)
+            max_depth=$(jq -r '.benchmarks[].context_size' "$local_json" | sort -rn | head -n1)
+            deepest_tg=$(jq -r ".benchmarks[] | select(.context_size == $max_depth) | .tg_throughput.mean // empty" "$local_json" | head -n1)
+            
+            # Baseline metrics for the summary table
+            SUMMARY_PP[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | if .pp_throughput.std > 0.5 then "\(.pp_throughput.mean + 0.5 | floor) +/-\(.pp_throughput.std + 0.5 | floor)" else "\(.pp_throughput.mean + 0.5 | floor)" end' "$local_json" | head -n1)
+            SUMMARY_TG[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | if .tg_throughput.std > 0.5 then "\((.tg_throughput.mean * 10 + 0.5 | floor) / 10) +/-\((.tg_throughput.std * 10 + 0.5 | floor) / 10)" else "\((.tg_throughput.mean * 10 + 0.5 | floor) / 10)" end' "$local_json" | head -n1)
+            SUMMARY_PEAK[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | .peak_throughput.mean + 0.5 | floor' "$local_json" | head -n1)
+            SUMMARY_TTFT[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | .e2e_ttft.mean + 0.5 | floor' "$local_json" | head -n1)
+            
+            if [[ -n "$baseline_tg" && -n "$deepest_tg" && "$max_depth" -gt 0 ]]; then
+                pct=$(echo "scale=1; (($deepest_tg - $baseline_tg) / $baseline_tg) * 100" | bc)
+                SUMMARY_DEGRADATION[$MODEL]="${pct}% @$((max_depth/1024))k"
+            fi
         fi
     else
         FAIL=$((FAIL + 1))
