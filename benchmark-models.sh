@@ -54,6 +54,13 @@ CONCURRENCY=""   # space-separated list; empty = not passed to llama-benchy
 ARENA_DIR=""     # set by --arena mode
 FILTERS=()
 
+# Crash-resume tracking
+CHECKPOINT_DIR="$SCRIPT_DIR/test-results/checkpoints"
+LAST_SESSION_FILE="$SCRIPT_DIR/test-results/.last-session"
+CHECKPOINT_FILE=""
+RESUME=false
+SKIP_MODELS=()
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -111,6 +118,10 @@ while [[ $# -gt 0 ]]; do
             RUNS="${1#*=}"
             shift
             ;;
+        --resume)
+            RESUME=true
+            shift
+            ;;
         --help|-h)
             cat <<'HELPEOF'
 Usage: benchmark-models.sh [OPTIONS] [FILTER...]
@@ -142,6 +153,7 @@ Profiles (simulating real-world document workloads):
 
 Other options:
   --runs N     Override number of runs (default: 3)
+  --resume     Resume from the last interrupted session (skip already-completed models)
   --help       Show this help
 
 Filters:
@@ -943,6 +955,121 @@ PYEOF
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Crash-resume checkpoint functions
+# ---------------------------------------------------------------------------
+
+# Create a new checkpoint file for this session and register it as last-known
+init_checkpoint() {
+    mkdir -p "$CHECKPOINT_DIR"
+    CHECKPOINT_FILE="$CHECKPOINT_DIR/session_${TIMESTAMP}.json"
+    python3 - "$CHECKPOINT_FILE" "$MODE" "$PP" "$TG" "$DEPTH" "$RUNS" <<'PYEOF'
+import json, sys, datetime
+f, mode, pp, tg, depth, runs = sys.argv[1:]
+data = {
+    "session_id": f.split("_")[-1].replace(".json", ""),
+    "started_at": datetime.datetime.now().isoformat(),
+    "mode": mode,
+    "settings": {"pp": pp, "tg": tg, "depth": depth, "runs": int(runs)},
+    "models": [],
+}
+with open(f, "w") as fh:
+    json.dump(data, fh, indent=2)
+PYEOF
+    echo "$CHECKPOINT_FILE" > "$LAST_SESSION_FILE"
+}
+
+# Mark a model as started (written BEFORE warmup so a crash is detectable)
+checkpoint_model_start() {
+    local model="$1"
+    [[ -z "$CHECKPOINT_FILE" ]] && return
+    python3 - "$CHECKPOINT_FILE" "$model" <<'PYEOF'
+import json, sys, datetime
+f, model = sys.argv[1:]
+with open(f) as fh:
+    data = json.load(fh)
+data["models"].append({
+    "model": model,
+    "status": "started",
+    "started_at": datetime.datetime.now().isoformat(),
+})
+with open(f, "w") as fh:
+    json.dump(data, fh, indent=2)
+PYEOF
+}
+
+# Mark a model as completed with its result (OK / FAIL / INCOHERENT / EMPTY)
+checkpoint_model_done() {
+    local model="$1"
+    local result="$2"
+    [[ -z "$CHECKPOINT_FILE" ]] && return
+    python3 - "$CHECKPOINT_FILE" "$model" "$result" <<'PYEOF'
+import json, sys, datetime
+f, model, result = sys.argv[1:]
+with open(f) as fh:
+    data = json.load(fh)
+for entry in reversed(data["models"]):
+    if entry["model"] == model and entry.get("status") == "started":
+        entry["status"] = "completed"
+        entry["result"] = result
+        entry["completed_at"] = datetime.datetime.now().isoformat()
+        break
+with open(f, "w") as fh:
+    json.dump(data, fh, indent=2)
+PYEOF
+}
+
+# Load a previous checkpoint and populate SKIP_MODELS (models already done)
+load_resume_checkpoint() {
+    if [[ ! -f "$LAST_SESSION_FILE" ]]; then
+        echo -e "${RED}Error: no previous session found. Run without --resume first.${NC}" >&2
+        exit 1
+    fi
+    local prev_cp
+    prev_cp=$(cat "$LAST_SESSION_FILE")
+    if [[ ! -f "$prev_cp" ]]; then
+        echo -e "${RED}Error: checkpoint file not found: $prev_cp${NC}" >&2
+        exit 1
+    fi
+
+    log "  ${CYAN}Resuming from checkpoint:${NC} $prev_cp"
+
+    local info
+    info=$(python3 - "$prev_cp" <<'PYEOF'
+import json, sys
+data = json.load(open(sys.argv[1]))
+completed = [e["model"] for e in data.get("models", []) if e.get("status") == "completed"]
+last_started = next(
+    (e["model"] for e in reversed(data.get("models", [])) if e.get("status") == "started"),
+    "",
+)
+s = data.get("settings", {})
+print("MODE:" + data.get("mode", ""))
+print("SETTINGS:pp=" + str(s.get("pp","")) + "  tg=" + str(s.get("tg","")) +
+      "  depth=" + str(s.get("depth","")) + "  runs=" + str(s.get("runs","")))
+print("LAST_STARTED:" + last_started)
+for m in completed:
+    print("DONE:" + m)
+PYEOF
+)
+    while IFS= read -r line; do
+        case "$line" in
+            DONE:*)    SKIP_MODELS+=("${line#DONE:}") ;;
+            MODE:*)    log "  Previous mode     : ${line#MODE:}" ;;
+            SETTINGS:*) log "  Previous settings : ${line#SETTINGS:}" ;;
+            LAST_STARTED:*)
+                local last="${line#LAST_STARTED:}"
+                if [[ -n "$last" ]]; then
+                    log "  ${YELLOW}Crashed while running: $last${NC} — will re-run it."
+                fi
+                ;;
+        esac
+    done <<< "$info"
+
+    log "  Skipping ${#SKIP_MODELS[@]} already-completed model(s)."
+    log ""
+}
+
 # --------------- MAIN ---------------
 log ""
 log "${BOLD}============================================================${NC}"
@@ -994,6 +1121,10 @@ log "  ${DIM}tg = token generation  (how fast the model writes its reply)${NC}"
 log "  ${DIM}depth = pre-filled context tokens (simulates document size)${NC}"
 log ""
 
+# Initialize crash-resume checkpoint and, if --resume, load previous state
+init_checkpoint
+[[ "$RESUME" == true ]] && load_resume_checkpoint
+
 # Check llama-benchy is available
 if ! uvx llama-benchy --help > /dev/null 2>&1; then
     log "${RED}Error: llama-benchy not available via uvx.${NC}"
@@ -1033,10 +1164,26 @@ declare -A SUMMARY_PP SUMMARY_TG SUMMARY_PEAK SUMMARY_TTFT SUMMARY_STATUS SUMMAR
 
 for MODEL in $MODELS; do
     IDX=$((IDX + 1))
+
+    # Skip models already completed in a --resume session
+    if [[ "$RESUME" == true ]]; then
+        _skip=false
+        for _done in "${SKIP_MODELS[@]:-}"; do
+            [[ "$MODEL" == "$_done" ]] && { _skip=true; break; }
+        done
+        if [[ "$_skip" == true ]]; then
+            log "  ${DIM}⏭  [$IDX/$MODEL_COUNT] $MODEL — skipped (completed in previous session)${NC}"
+            continue
+        fi
+    fi
+
     log "${BOLD}============================================================${NC}"
     log "${BOLD}  [$IDX/$MODEL_COUNT] $MODEL${NC}"
     log "${BOLD}============================================================${NC}"
     log ""
+
+    # Write checkpoint BEFORE starting so a crash is detectable
+    checkpoint_model_start "$MODEL"
 
     # Unload previous model to get a clean measurement
     unload_all
@@ -1046,6 +1193,7 @@ for MODEL in $MODELS; do
     if ! warmup_model "$MODEL"; then
         FAIL=$((FAIL + 1))
         SUMMARY_STATUS[$MODEL]="${WARMUP_FAIL_REASON:-FAIL}"
+        checkpoint_model_done "$MODEL" "${WARMUP_FAIL_REASON:-FAIL}"
         log ""
         continue
     fi
@@ -1054,6 +1202,7 @@ for MODEL in $MODELS; do
     if run_benchy "$MODEL"; then
         PASS=$((PASS + 1))
         SUMMARY_STATUS[$MODEL]="OK"
+        checkpoint_model_done "$MODEL" "OK"
         # In arena mode: generate recipe YAML and check vs personal best
         if [[ "$MODE" == "arena" ]]; then
             generate_recipe_yaml "$MODEL" 2>&1 | tee -a "$REPORT_FILE"
@@ -1085,6 +1234,7 @@ for MODEL in $MODELS; do
     else
         FAIL=$((FAIL + 1))
         SUMMARY_STATUS[$MODEL]="FAIL"
+        checkpoint_model_done "$MODEL" "FAIL"
     fi
     log ""
 done
@@ -1108,6 +1258,8 @@ log "  Date: $(date '+%Y-%m-%d %H:%M')  |  Mode: $MODE  |  Runs: $RUNS"
 log "  Depths tested: $DEPTH"
 log "  Models tested: $MODEL_COUNT  |  Passed: ${GREEN}$PASS${NC}  Failed: ${RED}$FAIL${NC}"
 log "  Total benchmark time: ${TOTAL_MIN} min"
+log "  Checkpoint : $CHECKPOINT_FILE"
+[[ $FAIL -gt 0 ]] && log "  ${YELLOW}Tip: if this was interrupted, resume with: ./benchmark-models.sh --resume${NC}"
 log ""
 log "  ${BOLD}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s' 'Model' 'Read (pp)' 'Write (tg)' 'Peak' 'TTFT' 'Deep ctx')${NC}"
 log "  ${DIM}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s' '' 'tok/s' 'tok/s' 'tok/s' 'ms' 'degradation')${NC}"
