@@ -3,6 +3,9 @@
 .env~
 LiteLLM/config.yaml
 llama-swap/config.yaml
+# .sample files are sanitized and intentionally tracked:
+!LiteLLM/config.yaml.sample
+!llama-swap/config.yaml.sample
 openclaw/
 
 # --- Build Artifacts & Output ---
