@@ -27,8 +27,13 @@
 set -euo pipefail
 
 LLAMA_SWAP_URL="${LLAMA_SWAP_URL:-http://localhost:28080}"
-RESULTS_DIR="$(dirname "$(readlink -f "$0")")/test-results/benchmarks"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+RESULTS_DIR="$SCRIPT_DIR/test-results/benchmarks"
+ARENA_BEST_FILE="$SCRIPT_DIR/test-results/arena-best-results.json"
 TIMEOUT=1800
+
+# spark-arena-cli: installed to ~/.local/bin on first --arena run
+SPARK_CLI="${HOME}/.local/bin/spark-arena-cli"
 
 # Colors
 GREEN='\033[0;32m'
@@ -45,6 +50,8 @@ TG="128"
 DEPTH="0 16384"
 RUNS=3
 MODE="medium-log"
+CONCURRENCY=""   # space-separated list; empty = not passed to llama-benchy
+ARENA_DIR=""     # set by --arena mode
 FILTERS=()
 
 # Parse arguments
@@ -85,6 +92,17 @@ while [[ $# -gt 0 ]]; do
             MODE="full"
             shift
             ;;
+        --arena)
+            # Spark-Arena leaderboard submission profile
+            # https://spark-arena.com/admin
+            PP="2048"
+            TG="128"
+            DEPTH="0 4096 8192 16384 32768 65535 100000"
+            CONCURRENCY="1 2 5 10"
+            RUNS=3
+            MODE="arena"
+            shift
+            ;;
         --runs)
             RUNS="$2"
             shift 2
@@ -118,6 +136,9 @@ Profiles (simulating real-world document workloads):
 
   --quick      Smoke test — pp512, tg128, depth 0, 1 run
   --full       Broad sweep — pp512+2048, tg128+256+512, depths 0-32k
+  --arena      Spark-Arena leaderboard profile — exact spec from spark-arena.com/admin
+               Saves results.csv + recipe.yaml per model to test-results/arena-submission/
+               Depths: 0 4096 8192 16384 32768 65535 100000 | Concurrency: 1 2 5 10
 
 Other options:
   --runs N     Override number of runs (default: 3)
@@ -156,6 +177,11 @@ done
 mkdir -p "$RESULTS_DIR"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 REPORT_FILE="$RESULTS_DIR/report_${TIMESTAMP}.txt"
+
+if [[ "$MODE" == "arena" ]]; then
+    ARENA_DIR="$SCRIPT_DIR/test-results/arena-submission/${TIMESTAMP}"
+    mkdir -p "$ARENA_DIR"
+fi
 
 log() { echo -e "$1" | tee -a "$REPORT_FILE"; }
 
@@ -198,14 +224,34 @@ warmup_model() {
     fi
 
     local content
-    content=$(jq -r '(.choices[0].message.reasoning // "") + (.choices[0].message.content // "")' "$response_file" 2>/dev/null | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    if [[ -z "$content" ]]; then
-        content="(Empty Response)"
-    fi
-    log "  Coherence check: ${CYAN}\"${content:0:150}\"${NC}"
-
+    content=$(jq -r '(.choices[0].message.reasoning_content // "") + (.choices[0].message.reasoning // "") + (.choices[0].message.content // "")' "$response_file" 2>/dev/null | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     rm -f "$response_file"
+
+    if [[ -z "$content" ]]; then
+        log "  ${CYAN}Coherence check:${NC} ${RED}FAILED — empty response${NC}"
+        WARMUP_FAIL_REASON="EMPTY"
+        return 1
+    fi
+
+    # Detect repetition loop: split into words, check if any single word
+    # makes up >60% of total words (e.g. "n8n n8n n8n..." or "the the the...")
+    local word_count most_freq_count most_freq_word
+    word_count=$(echo "$content" | wc -w)
+    if [[ "$word_count" -ge 5 ]]; then
+        most_freq_word=$(echo "$content" | tr ' ' '\n' | sort | uniq -c | sort -rn | awk 'NR==1{print $2}')
+        most_freq_count=$(echo "$content" | tr ' ' '\n' | grep -cFx "$most_freq_word" 2>/dev/null || echo 0)
+        local pct=$(( most_freq_count * 100 / word_count ))
+        if [[ "$pct" -ge 60 ]]; then
+            log "  ${CYAN}Coherence check:${NC} ${RED}FAILED — repetition loop (\"${most_freq_word}\" = ${pct}% of output)${NC}"
+            log "  ${RED}Skipping benchmark — model output is incoherent.${NC}"
+            WARMUP_FAIL_REASON="INCOHERENT"
+            return 1
+        fi
+    fi
+
+    log "  ${CYAN}Coherence check:${NC} \"${content:0:150}\""
     log "  Model ready (loaded in ${elapsed}s)"
+    WARMUP_FAIL_REASON=""
     return 0
 }
 
@@ -223,23 +269,29 @@ run_benchy() {
         extreme)    log "  Profile: Extreme Limit (push to ~100 pages, crash/swap detection)" ;;
         quick)      log "  Profile: Quick smoke test" ;;
         full)       log "  Profile: Full comprehensive sweep" ;;
+        arena)      log "  Profile: Spark-Arena leaderboard (7 depths × 4 concurrency levels)" ;;
     esac
-    log "  Running llama-benchy (pp=$PP  tg=$TG  depth=$DEPTH  runs=$RUNS)..."
+    local concurrency_display=""
+    [[ -n "$CONCURRENCY" ]] && concurrency_display="  concurrency=$CONCURRENCY"
+    log "  Running llama-benchy (pp=$PP  tg=$TG  depth=$DEPTH  runs=$RUNS${concurrency_display})..."
     log ""
 
+    # Build shared base flags (used by all runs)
+    local base_flags=""
+    base_flags+=" --base-url $LLAMA_SWAP_URL/v1"
+    base_flags+=" --model $model"
+    base_flags+=" --pp $PP"
+    base_flags+=" --tg $TG"
+    base_flags+=" --depth $DEPTH"
+    base_flags+=" --runs $RUNS"
+    base_flags+=" --latency-mode generation"
+    base_flags+=" --no-warmup"
+    base_flags+=" --skip-coherence"
+    [[ -n "$CONCURRENCY" ]] && base_flags+=" --concurrency $CONCURRENCY"
+    [[ "$MODE" == "arena" ]] && base_flags+=" --enable-prefix-caching"
+
     # --- Run 1: Save JSON for data parsing ---
-    local cmd_json="uvx llama-benchy"
-    cmd_json+=" --base-url $LLAMA_SWAP_URL/v1"
-    cmd_json+=" --model $model"
-    cmd_json+=" --pp $PP"
-    cmd_json+=" --tg $TG"
-    cmd_json+=" --depth $DEPTH"
-    cmd_json+=" --runs $RUNS"
-    cmd_json+=" --latency-mode generation"
-    cmd_json+=" --no-warmup"
-    cmd_json+=" --skip-coherence"
-    cmd_json+=" --save-result ${json_file}"
-    cmd_json+=" --format json"
+    local cmd_json="uvx llama-benchy${base_flags} --save-result ${json_file} --format json"
 
     local output exit_code=0
     output=$(eval "$cmd_json" 2>&1) || exit_code=$?
@@ -250,19 +302,24 @@ run_benchy() {
         return 1
     fi
 
+    # --- Arena mode: save submission CSV (separate run, same params) ---
+    if [[ "$MODE" == "arena" && -n "$ARENA_DIR" ]]; then
+        local arena_model_dir="$ARENA_DIR/${safe_name}"
+        mkdir -p "$arena_model_dir"
+        local csv_file="$arena_model_dir/results.csv"
+        local cmd_csv="uvx llama-benchy${base_flags} --save-result ${csv_file} --format csv"
+        log "  ${CYAN}Saving arena submission CSV...${NC}"
+        local csv_output csv_exit=0
+        csv_output=$(eval "$cmd_csv" 2>&1) || csv_exit=$?
+        if [[ $csv_exit -ne 0 ]]; then
+            log "  ${YELLOW}Warning: CSV run failed — JSON data still saved${NC}"
+        else
+            log "  ${DIM}Arena CSV  : $csv_file${NC}"
+        fi
+    fi
+
     # --- Run 2: Get the markdown table (for sharing on forums) ---
-    local cmd_md="uvx llama-benchy"
-    cmd_md+=" --base-url $LLAMA_SWAP_URL/v1"
-    cmd_md+=" --model $model"
-    cmd_md+=" --pp $PP"
-    cmd_md+=" --tg $TG"
-    cmd_md+=" --depth $DEPTH"
-    cmd_md+=" --runs $RUNS"
-    cmd_md+=" --latency-mode generation"
-    cmd_md+=" --no-warmup"
-    cmd_md+=" --skip-coherence"
-    cmd_md+=" --save-result ${md_file}"
-    cmd_md+=" --format md"
+    local cmd_md="uvx llama-benchy${base_flags} --save-result ${md_file} --format md"
 
     local md_output
     md_output=$(eval "$cmd_md" 2>&1) || true
@@ -421,6 +478,471 @@ PYEOF
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# spark-arena-cli helpers
+# ---------------------------------------------------------------------------
+
+# Download spark-arena-cli binary if it isn't already on PATH / ~/.local/bin
+install_spark_arena_cli() {
+    if command -v spark-arena-cli &>/dev/null; then
+        SPARK_CLI="$(command -v spark-arena-cli)"
+        return 0
+    fi
+    if [[ -x "$SPARK_CLI" ]]; then
+        return 0
+    fi
+    local arch
+    arch=$(uname -m)
+    local bin_name
+    [[ "$arch" == "aarch64" || "$arch" == "arm64" ]] \
+        && bin_name="spark-arena-cli-0.1.0-linux-arm64" \
+        || bin_name="spark-arena-cli-0.1.0-linux-amd64"
+    local url="https://github.com/spark-arena/spark-arena-cli/releases/download/v0.1.0/${bin_name}"
+    log "  ${DIM}Downloading spark-arena-cli from GitHub releases...${NC}"
+    mkdir -p "$(dirname "$SPARK_CLI")"
+    if curl -fsSL "$url" -o "$SPARK_CLI" 2>/dev/null; then
+        chmod +x "$SPARK_CLI"
+        log "  ${DIM}Installed to $SPARK_CLI${NC}"
+        # Add to PATH for this session
+        export PATH="$(dirname "$SPARK_CLI"):$PATH"
+    else
+        log "  ${YELLOW}Warning: could not download spark-arena-cli — manual install needed${NC}"
+        SPARK_CLI=""
+    fi
+}
+
+# Read our personal best tg tok/s (depth=0, concurrency=1) for a model from the history file
+get_personal_best_tg() {
+    local model="$1"
+    if [[ ! -f "$ARENA_BEST_FILE" ]]; then echo "0"; return; fi
+    python3 -c "
+import json, sys
+try:
+    d = json.load(open('$ARENA_BEST_FILE'))
+    entry = d.get('$model', {})
+    print(entry.get('tg_mean', 0))
+except:
+    print(0)
+" 2>/dev/null || echo "0"
+}
+
+# Save current result as personal best for a model
+save_personal_best() {
+    local model="$1"
+    local json_file="$2"
+    python3 - "$model" "$json_file" "$ARENA_BEST_FILE" <<'PYEOF'
+import json, sys, os
+model, bench_json, best_file = sys.argv[1], sys.argv[2], sys.argv[3]
+
+try:
+    data = json.load(open(bench_json))
+except Exception as e:
+    sys.exit(0)
+
+# Find depth=0, concurrency=1 entry
+baseline = None
+for b in data.get("benchmarks", []):
+    if b.get("context_size") == 0 and b.get("concurrency") == 1:
+        baseline = b
+        break
+if not baseline:
+    # Fallback: first entry with context_size=0
+    for b in data.get("benchmarks", []):
+        if b.get("context_size") == 0:
+            baseline = b
+            break
+if not baseline:
+    sys.exit(0)
+
+tg  = (baseline.get("tg_throughput")  or {}).get("mean", 0) or 0
+pp  = (baseline.get("pp_throughput")  or {}).get("mean", 0) or 0
+e2e = (baseline.get("e2e_ttft")       or {}).get("mean", 0) or 0
+
+try:
+    best = json.load(open(best_file)) if os.path.exists(best_file) else {}
+except:
+    best = {}
+
+best[model] = {
+    "tg_mean": round(tg, 2),
+    "pp_mean": round(pp, 1),
+    "ttft_ms": round(e2e, 1),
+    "timestamp": data.get("timestamp", ""),
+    "depth": 0,
+    "concurrency": 1,
+}
+with open(best_file, "w") as f:
+    json.dump(best, f, indent=2)
+PYEOF
+}
+
+# Compare current result vs personal best; if better, print submission info
+check_and_suggest_submit() {
+    local model="$1"
+    local json_file="$2"
+    local recipe_file="$3"
+
+    local prev_best
+    prev_best=$(get_personal_best_tg "$model")
+
+    local current_tg
+    current_tg=$(python3 -c "
+import json
+data = json.load(open('$json_file'))
+for b in data.get('benchmarks', []):
+    if b.get('context_size') == 0 and b.get('concurrency') == 1:
+        tg = (b.get('tg_throughput') or {}).get('mean', 0) or 0
+        print(round(tg, 2))
+        exit()
+for b in data.get('benchmarks', []):
+    if b.get('context_size') == 0:
+        tg = (b.get('tg_throughput') or {}).get('mean', 0) or 0
+        print(round(tg, 2))
+        exit()
+print(0)
+" 2>/dev/null || echo "0")
+
+    local is_better=0
+    python3 -c "exit(0 if float('$current_tg') > float('$prev_best') else 1)" 2>/dev/null && is_better=1
+
+    if [[ "$is_better" -eq 1 ]]; then
+        if python3 -c "exit(0 if float('$prev_best') > 0 else 1)" 2>/dev/null; then
+            log "  ${GREEN}★ NEW PERSONAL BEST${NC} — ${current_tg} tg tok/s (was ${prev_best})"
+        else
+            log "  ${GREEN}★ FIRST ARENA RESULT${NC} — ${current_tg} tg tok/s @ depth=0 concurrency=1"
+        fi
+        save_personal_best "$model" "$json_file"
+
+        # Try to get leaderboard context (best-effort scrape — may be empty)
+        log "  ${CYAN}Submission candidate${NC} — consider submitting to spark-arena.com/leaderboard"
+        log ""
+
+        install_spark_arena_cli
+
+        if [[ -n "$SPARK_CLI" && -x "$SPARK_CLI" ]]; then
+            local is_logged_in=0
+            "$SPARK_CLI" benchmark --help &>/dev/null && {
+                # Probe login state: spark-arena-cli prints a warning if not configured
+                local probe
+                probe=$(echo "exit" | timeout 3 "$SPARK_CLI" 2>&1 || true)
+                echo "$probe" | grep -q "Warning: Configuration not found" || is_logged_in=1
+            }
+
+            if [[ "$is_logged_in" -eq 1 ]]; then
+                log "  ${GREEN}spark-arena-cli is logged in.${NC} Run this to submit officially:"
+                log "  ${BOLD}  $SPARK_CLI benchmark $recipe_file${NC}"
+                log "  ${DIM}  (This re-runs the benchmark via sparkrun and auto-uploads results)${NC}"
+            else
+                log "  ${YELLOW}spark-arena-cli installed but not logged in.${NC} To submit:"
+                log "  ${DIM}  1. $SPARK_CLI login         # authenticate via Google/GitHub${NC}"
+                log "  ${DIM}  2. $SPARK_CLI setup         # configure sparkrun + llama-benchy${NC}"
+                log "  ${DIM}  3. $SPARK_CLI benchmark $recipe_file${NC}"
+            fi
+        else
+            log "  ${DIM}To submit to spark-arena, install spark-arena-cli:${NC}"
+            log "  ${DIM}  curl -fsSL https://github.com/spark-arena/spark-arena-cli/releases/download/v0.1.0/spark-arena-cli-0.1.0-linux-amd64 -o ~/.local/bin/spark-arena-cli && chmod +x ~/.local/bin/spark-arena-cli${NC}"
+            log "  ${DIM}  spark-arena-cli login${NC}"
+            log "  ${DIM}  spark-arena-cli benchmark $recipe_file${NC}"
+        fi
+        log ""
+    else
+        log "  ${DIM}tg ${current_tg} tok/s — personal best is ${prev_best} tok/s (no improvement, skipping submission)${NC}"
+    fi
+}
+
+# Generate a spark-arena recipe.yaml for a model
+generate_recipe_yaml() {
+    local model="$1"
+    local safe_name="${model//\//_}"
+    local out_dir="$ARENA_DIR/${safe_name}"
+    mkdir -p "$out_dir"
+
+    python3 - "$model" "$out_dir/recipe.yaml" <<'PYEOF'
+import sys, textwrap
+
+model_name = sys.argv[1]
+out_path   = sys.argv[2]
+
+# Per-model recipe metadata.
+# container: the local Docker image tag we actually use.
+# hf_model: canonical HuggingFace model ID for the submission.
+RECIPES = {
+    "Qwen3.5-35B-A3B-FP8": {
+        "hf_model":    "Qwen/Qwen3.5-35B-A3B-Instruct",
+        "description": "Qwen3.5 35B MoE FP8-dynamic — reasoning + tool use with MTP-2 speculation",
+        "container":   "vllm-node:Version_1",
+        "tp": 1, "gpu_mem": 0.7, "max_len": 131072,
+        "env": {
+            "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+            "VLLM_ENABLE_CUDAGRAPH_GC": "1",
+            "VLLM_USE_FLASHINFER_SAMPLER": "1",
+        },
+        "extras": [
+            "--kv-cache-dtype fp8",
+            "--load-format fastsafetensors",
+            "--attention-backend FLASHINFER",
+            "--enable-prefix-caching",
+            "--enable-chunked-prefill",
+            "--max-num-batched-tokens 4096",
+            '--speculative-config \'{"method":"mtp","num_speculative_tokens":2}\'',
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_xml",
+            "--reasoning-parser qwen3",
+        ],
+    },
+    "Qwen3.5-122B-A10B-int4-AutoRound": {
+        "hf_model":    "Qwen/Qwen3.5-122B-A10B-Instruct",
+        "description": "Qwen3.5 122B MoE INT4 AutoRound — large hybrid reasoning model",
+        "container":   "vllm-node-tf5:latest",
+        "tp": 1, "gpu_mem": 0.75, "max_len": 40960,
+        "env": {"VLLM_MARLIN_USE_ATOMIC_ADD": "1"},
+        "extras": [
+            "--trust-remote-code",
+            "--enforce-eager",
+            "--kv-cache-dtype fp8",
+            "--enable-prefix-caching",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_xml",
+            "--reasoning-parser qwen3",
+        ],
+    },
+    "Qwen3-VL-30B-A3B-Instruct-FP8": {
+        "hf_model":    "Qwen/Qwen3-VL-30B-A3B-Instruct",
+        "description": "Qwen3-VL 30B MoE FP8 — vision-language model",
+        "container":   "spark-vllm:Version_1",
+        "tp": 1, "gpu_mem": 0.60, "max_len": 32768,
+        "env": {},
+        "extras": [
+            "--trust-remote-code",
+            "--kv-cache-dtype fp8",
+            "--load-format fastsafetensors",
+            "--enable-prefix-caching",
+            "--limit-mm-per-prompt '{\"image\": 2}'",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_coder",
+        ],
+    },
+    "Qwen3-Omni-30B-A3B-Instruct": {
+        "hf_model":    "Qwen/Qwen3-Omni-30B-A3B-Instruct",
+        "description": "Qwen3-Omni 30B MoE — audio + vision + text multimodal",
+        "container":   "vllm-node:Version_1",
+        "tp": 1, "gpu_mem": 0.75, "max_len": 32768,
+        "env": {},
+        "extras": [
+            "--trust-remote-code",
+            "--load-format fastsafetensors",
+            "--enable-prefix-caching",
+            "--limit-mm-per-prompt '{\"image\": 2, \"audio\": 2}'",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_coder",
+        ],
+    },
+    "Qwen3-Coder-Next-FP8-Dynamic": {
+        "hf_model":    "Qwen/Qwen3-Coder-480B-A22B-FP8-Dynamic",
+        "description": "Qwen3-Coder-Next 480B MoE FP8-Dynamic — coding specialist",
+        "container":   "vllm-node-tf5:latest",
+        "tp": 1, "gpu_mem": 0.75, "max_len": 32768,
+        "env": {},
+        "extras": [
+            "--kv-cache-dtype fp8",
+            "--load-format fastsafetensors",
+            "--attention-backend flashinfer",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_coder",
+        ],
+    },
+    "Qwen3-Coder-Next-int4-AutoRound": {
+        "hf_model":    "Qwen/Qwen3-Coder-480B-A22B-Instruct",
+        "description": "Qwen3-Coder-Next 480B MoE INT4 AutoRound — coding + throughput optimized",
+        "container":   "vllm-node-tf5:latest",
+        "tp": 1, "gpu_mem": 0.6, "max_len": 32768,
+        "env": {
+            "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+            "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
+            "VLLM_USE_FLASHINFER_MOE_FP8": "1",
+        },
+        "extras": [
+            "--language-model-only",
+            "--enable-chunked-prefill",
+            "--max-num-batched-tokens 49152",
+            "--max-num-seqs 384",
+            "--kv-cache-dtype fp8",
+            "--load-format fastsafetensors",
+            "--optimization-level 3",
+            "--performance-mode throughput",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_coder",
+        ],
+    },
+    "Nemotron-3-Nano-4B-FP8": {
+        "hf_model":    "nvidia/Nemotron-3-Nano-4B-Instruct",
+        "description": "Nemotron-3-Nano 4B FP8 — ultra-fast orchestrator / routing model",
+        "container":   "spark-vllm:Version_1",
+        "tp": 1, "gpu_mem": 0.5, "max_len": 8192,
+        "env": {},
+        "extras": [
+            "--kv-cache-dtype fp8",
+            "--enforce-eager",
+            "--trust-remote-code",
+            "--load-format fastsafetensors",
+            "--enable-prefix-caching",
+            "--tool-call-parser qwen3_coder",
+            "--reasoning-parser nemotron_v3",
+            "--enable-auto-tool-choice",
+        ],
+    },
+    "Nemotron-3-Nano-30B-A3B-NVFP4": {
+        "hf_model":    "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4",
+        "description": "Nemotron-3-Nano 30B NVFP4 — Blackwell-native MoE with nano_v3 reasoning",
+        "container":   "vllm-node:Version_1",
+        "tp": 1, "gpu_mem": 0.65, "max_len": 131072,
+        "env": {
+            "VLLM_USE_FLASHINFER_MOE_FP4": "1",
+            "VLLM_FLASHINFER_MOE_BACKEND": "throughput",
+        },
+        "extras": [
+            "--kv-cache-dtype fp8",
+            "--enforce-eager",
+            "--trust-remote-code",
+            "--quantization modelopt_fp4",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_coder",
+            "--reasoning-parser nano_v3",
+        ],
+    },
+    "Nemotron-3-Super-120B-A12B-NVFP4": {
+        "hf_model":    "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+        "description": "Nemotron-3-Super 120B NVFP4 — large reasoning model with CUTLASS MoE",
+        "container":   "spark-vllm:Version_1",
+        "tp": 1, "gpu_mem": 0.7, "max_len": 65536,
+        "env": {
+            "VLLM_FLASHINFER_ALLREDUCE_BACKEND": "trtllm",
+            "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
+        },
+        "extras": [
+            "--kv-cache-dtype fp8",
+            "--moe-backend cutlass",
+            "--trust-remote-code",
+            "--enable-prefix-caching",
+            "--load-format fastsafetensors",
+            "--tool-call-parser qwen3_coder",
+            "--enable-auto-tool-choice",
+            "--reasoning-parser nemotron_v3",
+        ],
+    },
+    "GPT-OSS-120B": {
+        "hf_model":    "openai/gpt-oss-120b",
+        "description": "OpenAI GPT-OSS 120B MXFP4 — open-weights GPT model",
+        "container":   "vllm-node-mxfp4",
+        "tp": 1, "gpu_mem": 0.7, "max_len": 65536,
+        "env": {"VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8": "1"},
+        "extras": [
+            "--quantization mxfp4",
+            "--kv-cache-dtype fp8",
+            "--max-num-batched-tokens 8192",
+            "--enable-prefix-caching",
+            "--load-format fastsafetensors",
+            "--tool-call-parser openai",
+            "--reasoning-parser openai_gptoss",
+            "--enable-auto-tool-choice",
+        ],
+    },
+    "Mistral-Small-24B-Instruct-2501": {
+        "hf_model":    "mistralai/Mistral-Small-24B-Instruct-2501",
+        "description": "Mistral Small 24B — fast roleplay and instruction following",
+        "container":   "vllm-node:Version_1",
+        "tp": 1, "gpu_mem": 0.7, "max_len": 32768,
+        "env": {},
+        "extras": [
+            "--trust-remote-code",
+            "--enforce-eager",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser mistral",
+        ],
+    },
+    "Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF": {
+        "hf_model":    "HauhauCS/Qwen3.5-35B-A3B-Uncensored-Aggressive-GGUF",
+        "description": "Qwen3.5 35B MoE Q4_K_M GGUF — uncensored, llama.cpp serving",
+        "container":   "ghcr.io/martin-b78/llama-cpp-spark:latest",
+        "tp": 1, "gpu_mem": 0.0, "max_len": 16384,
+        "env": {"GGML_CUDA_ENABLE_UNIFIED_MEMORY": "1"},
+        "extras": [
+            "--ctx-size 16384",
+            "--n-gpu-layers 99",
+            "--parallel 4",
+            "--no-mmap",
+        ],
+        "runtime": "llama-cpp",
+    },
+}
+
+r = RECIPES.get(model_name)
+if not r:
+    # Unknown model — generate a minimal placeholder recipe
+    r = {
+        "hf_model":    f"<TODO: HuggingFace model ID for {model_name}>",
+        "description": model_name,
+        "container":   "<TODO: container image>",
+        "tp": 1, "gpu_mem": 0.7, "max_len": 32768,
+        "env": {}, "extras": [],
+    }
+
+runtime  = r.get("runtime", "vllm")
+hf_model = r["hf_model"]
+extras   = "\n".join(f"    {e} \\" for e in r["extras"])
+env_block = ""
+if r["env"]:
+    env_lines = "\n".join(f"  {k}: '{v}'" for k, v in r["env"].items())
+    env_block = f"env:\n{env_lines}\n"
+
+if runtime == "llama-cpp":
+    cmd = (
+        f"llama-server \\\n"
+        f"    -hf {hf_model} \\\n"
+        f"    --host {{host}} --port {{port}} \\\n"
+        + "\n".join(f"    {e} \\" for e in r["extras"])
+        + "\n"
+    )
+else:
+    cmd = (
+        f"vllm serve {hf_model} \\\n"
+        f"    --served-model-name {model_name} \\\n"
+        f"    --host {{host}} --port {{port}} \\\n"
+        f"    --tensor-parallel-size {{tensor_parallel}} \\\n"
+        f"    --gpu-memory-utilization {{gpu_memory_utilization}} \\\n"
+        f"    --max-model-len {{max_model_len}} \\\n"
+        + "\n".join(f"    {e} \\" for e in r["extras"])
+        + "\n"
+    )
+
+yaml = f"""recipe_version: '1'
+name: {model_name}
+description: {r['description']}
+model: {hf_model}
+cluster_only: false
+container: {r['container']}
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: {r['tp']}
+  gpu_memory_utilization: {r['gpu_mem']}
+  max_model_len: {r['max_len']}
+{env_block}command: |
+  {cmd.rstrip()}
+solo_only: false
+"""
+
+with open(out_path, "w") as f:
+    f.write(yaml)
+
+print(f"  Recipe YAML: {out_path}")
+PYEOF
+
+    if [[ $? -ne 0 ]]; then
+        log "  ${YELLOW}Warning: recipe.yaml generation failed for $model${NC}"
+    fi
+}
+
 # --------------- MAIN ---------------
 log ""
 log "${BOLD}============================================================${NC}"
@@ -457,6 +979,13 @@ case "$MODE" in
         ;;
     full)
         log "  ${DIM}Full comprehensive sweep — broad pp/tg/depth combinations.${NC}"
+        ;;
+    arena)
+        log "  ${CYAN}Profile: Spark-Arena Leaderboard Submission${NC}"
+        log "  ${DIM}Official spark-arena.com benchmark spec: 7 depth levels × 4 concurrency${NC}"
+        log "  ${DIM}levels × 3 runs = 84 data points per model.${NC}"
+        log "  ${DIM}Generates results.csv + recipe.yaml per model in:${NC}"
+        log "  ${DIM}  $ARENA_DIR${NC}"
         ;;
 esac
 log ""
@@ -513,9 +1042,10 @@ for MODEL in $MODELS; do
     unload_all
 
     # Load this model
+    WARMUP_FAIL_REASON=""
     if ! warmup_model "$MODEL"; then
         FAIL=$((FAIL + 1))
-        SUMMARY_STATUS[$MODEL]="FAIL"
+        SUMMARY_STATUS[$MODEL]="${WARMUP_FAIL_REASON:-FAIL}"
         log ""
         continue
     fi
@@ -524,6 +1054,13 @@ for MODEL in $MODELS; do
     if run_benchy "$MODEL"; then
         PASS=$((PASS + 1))
         SUMMARY_STATUS[$MODEL]="OK"
+        # In arena mode: generate recipe YAML and check vs personal best
+        if [[ "$MODE" == "arena" ]]; then
+            generate_recipe_yaml "$MODEL" 2>&1 | tee -a "$REPORT_FILE"
+            local arena_json="$RESULTS_DIR/${MODEL//\//_}_${TIMESTAMP}.json"
+            local arena_recipe="$ARENA_DIR/${MODEL//\//_}/recipe.yaml"
+            check_and_suggest_submit "$MODEL" "$arena_json" "$arena_recipe" 2>&1 | tee -a "$REPORT_FILE"
+        fi
 
         # Extract numbers for final summary from JSON
         local_json="$RESULTS_DIR/${MODEL//\//_}_${TIMESTAMP}.json"
@@ -590,6 +1127,9 @@ for MODEL in $MODELS; do
     if [[ "$status" == "OK" ]]; then
         printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "$pp" "$tg" "$peak" "$ttft" "$degrad"
         log "${GREEN}${line}${NC}"
+    elif [[ "$status" == "INCOHERENT" ]]; then
+        printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "INCOHERENT" "—" "—" "—" "—"
+        log "${YELLOW}${line}${NC}"
     else
         printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "FAIL" "—" "—" "—" "—"
         log "${RED}${line}${NC}"
@@ -617,4 +1157,36 @@ log "    Forum tables: $RESULTS_DIR/*_${TIMESTAMP}.md"
 log ""
 log "  ${DIM}Tip: To share on NVIDIA forums, copy the llama-benchy tables${NC}"
 log "  ${DIM}from the .md files — they use the standard format everyone knows.${NC}"
+
+if [[ "$MODE" == "arena" && -n "$ARENA_DIR" ]]; then
+    log ""
+    log "${BOLD}============================================================${NC}"
+    log "${BOLD}  SPARK-ARENA SUBMISSION FILES${NC}"
+    log "${BOLD}============================================================${NC}"
+    log ""
+    log "  Submission directory: ${CYAN}$ARENA_DIR${NC}"
+    log ""
+    log "  Per-model folders (one submission per model):"
+    for MODEL in $MODELS; do
+        safe="${MODEL//\//_}"
+        model_dir="$ARENA_DIR/$safe"
+        if [[ -f "$model_dir/results.csv" && -f "$model_dir/recipe.yaml" ]]; then
+            log "    ${GREEN}✓${NC} $MODEL"
+            log "        recipe.yaml : $model_dir/recipe.yaml"
+            log "        results.csv : $model_dir/results.csv"
+        elif [[ "${SUMMARY_STATUS[$MODEL]:-FAIL}" != "OK" ]]; then
+            log "    ${RED}✗${NC} $MODEL  (benchmark failed — no submission files)"
+        fi
+    done
+    log ""
+    log "  ${BOLD}How to submit to spark-arena.com/admin:${NC}"
+    log "  ${DIM}1. Open https://spark-arena.com/admin${NC}"
+    log "  ${DIM}2. For each model folder above:${NC}"
+    log "  ${DIM}     a. Paste or upload the contents of recipe.yaml${NC}"
+    log "  ${DIM}     b. Upload results.csv${NC}"
+    log "  ${DIM}3. Submit one entry per model.${NC}"
+    log ""
+    log "  ${DIM}Note: The recipe.yaml 'model:' field uses the canonical HuggingFace ID.${NC}"
+    log "  ${DIM}If your model was downloaded from a different source, update it.${NC}"
+fi
 log "${BOLD}============================================================${NC}"
