@@ -13,7 +13,65 @@ macros:
   host: "0.0.0.0"
   gpu_mem: "0.7"
   #tensor-parallel-size
-  tensor_parallel: "1" 
+  tensor_parallel: "1"
+
+# ===================================================
+# 🔀 CONCURRENT MODEL GROUPS  (S / M / L tiers)
+# ===================================================
+# 128GB VRAM total − ~20GB system = ~108GB available for models.
+#
+# Behavior:
+#   swap: false     → all members in the same group stay loaded simultaneously
+#   exclusive: true → evict all other groups when this group loads
+#   exclusive: false → coexist with other groups (S and M can overlap)
+#
+# ┌──────────────────────────────────────────────────────────────────────┐
+# │  Intended usage modes (pick one at a time):                          │
+# │  4× S   : up to 4 small models simultaneously                       │
+# │  2S + 1M: 2 small + 1 medium (gpu_mem of each must sum ≤ ~0.84)    │
+# │  2× M   : up to 2 medium models simultaneously                      │
+# │  1× L   : one 120B+ model solo — evicts S and M automatically       │
+# └──────────────────────────────────────────────────────────────────────┘
+#
+# ⚠️  VRAM NOTE: Each vLLM instance pre-allocates
+#      gpu_memory_utilization × 128GB of CUDA memory.
+#      For concurrent use to fit in 108GB, reduce --gpu-memory-utilization
+#      per model before enabling multi-model loading.
+#      Recommended concurrent values:
+#        S tier: 0.12–0.22  (15–28 GB each, 4 fit in ~93 GB)
+#        M tier: 0.40       (51 GB each, 2 fit in ~102 GB)
+#        L tier: keep 0.70–0.75 (solo only)
+groups:
+
+  # S — Small / fast models: 4B–30B quantized
+  small-models:
+    swap: false
+    exclusive: false
+    members:
+      - Nemotron-3-Nano-4B-FP8
+      - Nemotron-3-Nano-30B-A3B-NVFP4
+      - Qwen3-Coder-Next-int4-AutoRound
+      - Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF
+
+  # M — Medium models: 30B FP8 / 24B BF16
+  medium-models:
+    swap: false
+    exclusive: false
+    members:
+      - Qwen3.5-35B-A3B-FP8
+      - Qwen3-VL-30B-A3B-Instruct-FP8
+      - Qwen3-Omni-30B-A3B-Instruct
+      - Qwen3-Coder-Next-FP8-Dynamic
+      - Mistral-Small-24B-Instruct-2501
+
+  # L — Large 120B+ models: solo only
+  large-models:
+    swap: true
+    exclusive: true
+    members:
+      - Qwen3.5-122B-A10B-int4-AutoRound
+      - Nemotron-3-Super-120B-A12B-NVFP4
+      - GPT-OSS-120B
 
 models:
 # --- llama.cpp GGUF Model ---
