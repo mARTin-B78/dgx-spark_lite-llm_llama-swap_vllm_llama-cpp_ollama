@@ -19,6 +19,7 @@ test-results/
 *~
 *.swp
 *.log
+*.bak*
 .DS_Store
 *klappt nicht so ganz*
 *.gemini.created
