@@ -303,7 +303,7 @@ run_benchy() {
     [[ "$MODE" == "arena" ]] && base_flags+=" --enable-prefix-caching"
 
     # --- Run 1: Save JSON for data parsing ---
-    local cmd_json="uvx llama-benchy${base_flags} --save-result ${json_file} --format json"
+    local cmd_json="${BENCHY_CMD}${base_flags} --save-result ${json_file} --format json"
 
     local output exit_code=0
     output=$(eval "$cmd_json" 2>&1) || exit_code=$?
@@ -319,7 +319,7 @@ run_benchy() {
         local arena_model_dir="$ARENA_DIR/${safe_name}"
         mkdir -p "$arena_model_dir"
         local csv_file="$arena_model_dir/results.csv"
-        local cmd_csv="uvx llama-benchy${base_flags} --save-result ${csv_file} --format csv"
+        local cmd_csv="${BENCHY_CMD}${base_flags} --save-result ${csv_file} --format csv"
         log "  ${CYAN}Saving arena submission CSV...${NC}"
         local csv_output csv_exit=0
         csv_output=$(eval "$cmd_csv" 2>&1) || csv_exit=$?
@@ -331,7 +331,7 @@ run_benchy() {
     fi
 
     # --- Run 2: Get the markdown table (for sharing on forums) ---
-    local cmd_md="uvx llama-benchy${base_flags} --save-result ${md_file} --format md"
+    local cmd_md="${BENCHY_CMD}${base_flags} --save-result ${md_file} --format md"
 
     local md_output
     md_output=$(eval "$cmd_md" 2>&1) || true
@@ -1125,12 +1125,21 @@ log ""
 init_checkpoint
 [[ "$RESUME" == true ]] && load_resume_checkpoint
 
-# Check llama-benchy is available
-if ! uvx llama-benchy --help > /dev/null 2>&1; then
-    log "${RED}Error: llama-benchy not available via uvx.${NC}"
-    log "Install with: pip install llama-benchy  OR  uv pip install llama-benchy"
+# Detect how llama-benchy is available: uvx (preferred), direct, or missing
+if uvx llama-benchy --help > /dev/null 2>&1; then
+    BENCHY_CMD="uvx llama-benchy"
+elif command -v llama-benchy > /dev/null 2>&1; then
+    BENCHY_CMD="llama-benchy"
+else
+    log "${RED}Error: llama-benchy not found.${NC}"
+    log ""
+    log "Install one of these ways:"
+    log "  ${BOLD}uvx${NC} (no install needed):  works if 'uv' is installed"
+    log "  ${BOLD}pip install llama-benchy${NC}  (install into current venv/system)"
+    log "  ${BOLD}uv pip install llama-benchy${NC}"
     exit 1
 fi
+log "  ${DIM}Using: $BENCHY_CMD${NC}"
 
 # Fetch model list
 MODELS=$(curl -sf "$LLAMA_SWAP_URL/v1/models" | jq -r '.data[].id' | sort)
