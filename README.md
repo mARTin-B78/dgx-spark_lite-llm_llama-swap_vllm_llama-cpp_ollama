@@ -3,6 +3,8 @@
 > **Full-stack LLM inference for NVIDIA DGX Spark (Grace-Blackwell GB10)**
 > vLLM · llama.cpp · llama-swap · Ollama · LiteLLM — on 128 GB unified memory
 
+> For a narrative walkthrough with benchmark numbers and deeper explanations, see [TUTORIAL.md](TUTORIAL.md).
+
 ---
 
 ## What is this?
