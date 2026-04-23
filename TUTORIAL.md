@@ -79,7 +79,12 @@ Measured with [llama-benchy](https://github.com/eugr/llama-benchy) by [@eugr](ht
 
 > ¹ **Qwen3.5-35B-FP8 and Qwen3.6-35B-FP8 show pp=0** in this run — the prompt-processing test timed out, likely due to a cold-start scheduling edge case. Token generation numbers are correct and consistent with prior runs.
 
-> **Qwen3.5-122B FAIL** — the model did not pass the benchmark this session. Most likely cause: residual CUDA memory from the previous model prevented a clean startup. Re-running after a full stack restart resolves it. Use the dynamic VRAM launcher script (Step 6) to make this reliable.
+> **Qwen3.5-122B FAIL** — root cause: `model_extra_tensors.safetensors` was missing from the model directory. The fastsafetensors loader enumerates all files listed in `model.safetensors.index.json` at startup and fails hard if any are absent. Fix: re-run the HuggingFace download — it will fetch only the missing file without re-downloading the full 90 GB.
+> ```bash
+> huggingface-cli download Intel/Qwen3.5-122B-A10B-int4-AutoRound \
+>   model_extra_tensors.safetensors \
+>   --local-dir $LLM_ROOT_PATH/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound
+> ```
 
 **GPT-OSS-120B at 56 tok/s** is the standout number — a 120B model generating tokens faster than most 35B models, enabled by CUTLASS MXFP4 kernels on the Blackwell architecture ([@christopherowen](https://github.com/christopherowen)).
 
