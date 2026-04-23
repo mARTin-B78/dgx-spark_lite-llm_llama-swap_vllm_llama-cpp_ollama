@@ -136,67 +136,122 @@ Optional. Only needed for GPT-OSS-120B with native MXFP4 quantization (fastest p
 
 ---
 
-## Step 6 — Configure llama-swap
+## Step 6 — Download models
 
-Copy and edit the sample config:
+Install the HuggingFace CLI if you don't have it:
+
+```bash
+pip install huggingface-hub
+```
+
+Then download each model into the directory structure that matches `LLM_ROOT_PATH`. The paths below correspond to the `config.yaml.sample` — change the base prefix to your `$LLM_ROOT_PATH`.
+
+### vLLM models (safetensors)
+
+```bash
+BASE=$LLM_ROOT_PATH/vllm   # e.g. /home/YOUR_USER/LLMs/vllm
+
+# --- S tier (small / fast) ---
+huggingface-cli download nvidia/Nemotron-3-Nano-4B-FP8 \
+  --local-dir $BASE/Nvidia/Nemotron-3-Nano-4B-FP8
+
+huggingface-cli download nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 \
+  --local-dir $BASE/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4
+
+huggingface-cli download Intel/Qwen3-Coder-Next-int4-AutoRound \
+  --local-dir $BASE/Alibaba/Qwen3-Coder-Next-int4-AutoRound
+
+# --- M tier (medium) ---
+huggingface-cli download Qwen/Qwen3.5-35B-A3B-FP8 \
+  --local-dir $BASE/Alibaba/Qwen3.5-35B-A3B-FP8
+
+huggingface-cli download Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 \
+  --local-dir $BASE/Alibaba/Qwen3-VL-30B-A3B-Instruct-FP8
+
+huggingface-cli download Qwen/Qwen3-Omni-30B-A3B-Instruct \
+  --local-dir $BASE/Alibaba/Qwen3-Omni-30B-A3B-Instruct
+
+huggingface-cli download Qwen/Qwen3-Coder-Next-FP8-Dynamic \
+  --local-dir $BASE/Alibaba/Qwen3-Coder-Next-FP8-Dynamic
+
+huggingface-cli download mistralai/Mistral-Small-24B-Instruct-2501 \
+  --local-dir $BASE/Mistral/Mistral-Small-24B-Instruct-2501
+
+# --- L tier (large / solo) ---
+huggingface-cli download Intel/Qwen3.5-122B-A10B-int4-AutoRound \
+  --local-dir $BASE/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound
+
+huggingface-cli download nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
+  --local-dir $BASE/Nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+
+huggingface-cli download openai/gpt-oss-120b \
+  --local-dir $BASE/OpenAI/GPT-OSS-120B
+```
+
+### GGUF models (llama.cpp)
+
+```bash
+BASE=$LLM_ROOT_PATH/ollama   # e.g. /home/YOUR_USER/LLMs/ollama
+
+huggingface-cli download HauhauCS/Qwen3.5-35B-A3B-Uncensored-Aggressive \
+  --include "*.gguf" --include "*.jinja" \
+  --local-dir $BASE/Alibaba/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive
+```
+
+---
+
+## Step 7 — Configure llama-swap
+
+Copy the full sample config (it contains all models pre-configured with correct paths):
 
 ```bash
 cp llama-swap/config.yaml.sample llama-swap/config.yaml
 ```
 
-Replace every `/path/to/` placeholder with your actual paths (must match `LLM_ROOT_PATH`).
+Then do a global replace of `/path/to/` with your actual `LLM_ROOT_PATH`:
 
-Key structural rules:
-- Every group with `swap: false` keeps all its members loaded simultaneously.
-- The `large-models` group uses `exclusive: true` — it evicts S and M tiers automatically.
-- `cmd` uses `--network container:llama-swap` so model containers share llama-swap's network namespace and bind to `localhost:${PORT}`.
-
-Abbreviated example:
-
-```yaml
-groups:
-  small-models:
-    swap: false
-    exclusive: false
-    members: [Nemotron-3-Nano-4B-FP8, Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF]
-
-  medium-models:
-    swap: false
-    exclusive: false
-    members: [Qwen3.5-35B-A3B-FP8, Mistral-Small-24B-Instruct-2501]
-
-  large-models:
-    swap: true
-    exclusive: true
-    members: [Qwen3.5-122B-A10B-int4-AutoRound, GPT-OSS-120B]
-
-models:
-  Qwen3.5-35B-A3B-FP8:
-    ttl: 600
-    cmd: >
-      docker run --rm --name vllm-qwen3.5-35b-${PORT}
-      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
-      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
-      -v /home/YOUR_USER/LLMs/vllm:/models/vllm
-      vllm-node
-      vllm serve /models/vllm/Alibaba/Qwen3.5-35B-A3B-FP8
-      --served-model-name Qwen3.5-35B-A3B-FP8
-      --host ${host} --port ${PORT}
-      --gpu-memory-utilization 0.40
-      --max-model-len 131072
-      --kv-cache-dtype fp8
-      --load-format fastsafetensors
-      --attention-backend FLASHINFER
-      --enable-prefix-caching
-      --enable-auto-tool-choice
-      --tool-call-parser qwen3_xml
-      --reasoning-parser qwen3
-    cmdStop: "docker stop vllm-qwen3.5-35b-${PORT}"
+```bash
+sed -i "s|/path/to/LLMs|$LLM_ROOT_PATH|g" llama-swap/config.yaml
+sed -i "s|/path/to/Docker|$HOME/Docker|g" llama-swap/config.yaml
 ```
+
+The sample covers all models in the tier table above. Key structural rules:
+- `swap: false` keeps all group members loaded simultaneously.
+- `exclusive: true` on the `large-models` group evicts S and M tiers automatically when any 120B+ model loads.
+- Every `cmd` uses `--network container:llama-swap` — model containers share llama-swap's network namespace and bind to `localhost:${PORT}`.
+
+See [llama-swap/config.yaml.sample](llama-swap/config.yaml.sample) for the complete annotated config.
 
 ---
 
-## Step 7 — Dynamic launcher for large models (122B+)
+## Step 8 — Configure LiteLLM
+
+Copy the sample and update your master key:
+
+```bash
+cp LiteLLM/config.yaml.sample LiteLLM/config.yaml
+sed -i "s|sk-your-litellm-master-key|$LITELLM_MASTER_KEY|g" LiteLLM/config.yaml
+```
+
+The sample wires every llama-swap model through `http://llama-swap:8080/v1` (Docker DNS) and sets per-model reasoning flags:
+
+| Model | `supports_reasoning` | `merge_reasoning_content_in_choices` |
+|---|---|---|
+| Qwen3.5-35B-FP8 | true | true |
+| Qwen3.5-122B-int4 | true | false (separate `reasoning` field) |
+| Qwen3-Omni / Qwen3-Coder | true | true |
+| Qwen3-VL | false | — |
+| Nemotron-4B-FP8 | false | — |
+| Nemotron-30B-NVFP4 | true | true |
+| Nemotron-Super-120B | true | true |
+| GPT-OSS-120B | true | true |
+| Mistral-Small-24B | false | — |
+
+See [LiteLLM/config.yaml.sample](LiteLLM/config.yaml.sample) for the complete annotated config.
+
+---
+
+## Step 9 — Dynamic launcher for large models (122B+)
 
 For any model that occupies >80 GB, residual CUDA memory from the previous model can cause vLLM's startup sanity check to fail (`free_memory < gpu_memory_utilization × total`).
 
@@ -219,7 +274,7 @@ Reference it from `config.yaml`:
 
 ---
 
-## Step 8 — docker-compose.yml
+## Step 10 — docker-compose.yml
 
 Copy the sample and replace all `YOUR_USER` / `YOUR_*` placeholders:
 
@@ -332,7 +387,7 @@ volumes:
 
 ---
 
-## Step 9 — Verify
+## Step 11 — Verify
 
 ```bash
 # Check llama-swap model list
@@ -347,7 +402,7 @@ docker logs -f llama-swap
 
 ---
 
-## Step 10 — Benchmark
+## Step 12 — Benchmark
 
 > **Credit: [@eugr](https://github.com/eugr) — [llama-benchy](https://github.com/eugr/llama-benchy)**
 >
