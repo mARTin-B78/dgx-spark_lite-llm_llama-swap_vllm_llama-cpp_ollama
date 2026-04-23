@@ -15,8 +15,6 @@ services:
       resources:
         reservations:
           devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
-    environment:
-      - VLLM_ATTENTION_BACKEND=FLASHINFER
     command: >
       --model /model/Qwen3.5-7B-Instruct --host 0.0.0.0 --port 8000
     networks: [dgx_net]
@@ -36,14 +34,19 @@ services:
     command: --host 0.0.0.0 --port 19000 --models-dir /models --n-gpu-layers 99
     networks: [dgx_net]
 
-  # 3. LLAMA-SWAP (VRAM Orchestrator) - Port 28080
+  # 3. LLAMA-SWAP (VRAM Orchestrator) - Port 28080 (host) → 8080 (container)
+  # LiteLLM reaches it via Docker DNS: http://llama-swap:8080
+  # Model containers join its network namespace: --network container:llama-swap → localhost:8080
   llama-swap:
     image: ghcr.io/${GH_USER}/llama-swap-spark:latest
     container_name: llama-swap
-    network_mode: host
+    ports:
+      - "28080:8080"
     volumes:
-      - ${REPO_CONFIG_PATH}/llama-swap/config.yaml:/app/config.yaml
+      - /home/sparky/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/llama-swap:/app
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - dgx_net
 
   # 4. OLLAMA - Port 11434
   ollama:

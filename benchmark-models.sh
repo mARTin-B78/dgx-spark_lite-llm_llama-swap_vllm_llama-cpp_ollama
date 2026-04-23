@@ -245,13 +245,14 @@ warmup_model() {
         return 1
     fi
 
-    # Detect repetition loop: split into words, check if any single word
+    # Detect repetition loop: split into non-empty words, check if any single word
     # makes up >60% of total words (e.g. "n8n n8n n8n..." or "the the the...")
+    # grep -v '^$' filters empty tokens from multi-space code in reasoning_content.
     local word_count most_freq_count most_freq_word
-    word_count=$(echo "$content" | wc -w)
+    word_count=$(echo "$content" | tr ' ' '\n' | grep -v '^$' | wc -l)
     if [[ "$word_count" -ge 5 ]]; then
-        most_freq_word=$(echo "$content" | tr ' ' '\n' | sort | uniq -c | sort -rn | awk 'NR==1{print $2}')
-        most_freq_count=$(echo "$content" | tr ' ' '\n' | grep -cFx "$most_freq_word" 2>/dev/null || echo 0)
+        most_freq_word=$(echo "$content" | tr ' ' '\n' | grep -v '^$' | sort | uniq -c | sort -rn | awk 'NR==1{print $2}')
+        most_freq_count=$(echo "$content" | tr ' ' '\n' | grep -v '^$' | grep -cFx "$most_freq_word" 2>/dev/null || echo 0)
         local pct=$(( most_freq_count * 100 / word_count ))
         if [[ "$pct" -ge 60 ]]; then
             log "  ${CYAN}Coherence check:${NC} ${RED}FAILED — repetition loop (\"${most_freq_word}\" = ${pct}% of output)${NC}"

@@ -15,8 +15,7 @@ RUN apt-get update && apt-get install -y python3 python3-pip curl && rm -rf /var
 
 WORKDIR /app
 
-# Ensure FlashInfer and MoE backends are optimized for SM12.1
-ENV VLLM_ATTENTION_BACKEND=FLASHINFER
+# Ensure MoE backends are optimized for SM12.1
 ENV VLLM_FLASHINFER_MOE_BACKEND=latency
 ENV GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
 
