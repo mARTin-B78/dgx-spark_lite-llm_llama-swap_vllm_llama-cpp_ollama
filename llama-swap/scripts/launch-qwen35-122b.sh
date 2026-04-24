@@ -26,7 +26,11 @@ TOTAL_MIB=$(echo "$MEM_LINE" | awk -F',' '{gsub(/ /,"",$2); print $2+0}')
 # CUDA only sees 121.69 GiB (124610 MiB) — the difference is OS/driver overhead.
 # We compute against CUDA's view so the result matches vLLM's startup check.
 #   gmem = (free_nv - nvcuda_overhead - safety) / cuda_total
-#   clamped to [0.60, 0.85]
+#   clamped to [0.82, 0.90]
+#
+# Floor raised to 0.82 because this 122B model needs:
+#   weights 62.65 GiB + compile/activations ~12 GiB + KV cache for 131k ctx
+# Anything below ~0.82 leaves negative KV cache memory and vLLM refuses to start.
 GMEM=$(awk -v f="$FREE_MIB" -v t_nv="$TOTAL_MIB" 'BEGIN {
     cuda_t  = 124610;
     safety  = 3072;
@@ -34,15 +38,15 @@ GMEM=$(awk -v f="$FREE_MIB" -v t_nv="$TOTAL_MIB" 'BEGIN {
     cuda_free = f - overhead - safety;
     if (cuda_free < 0) cuda_free = 0;
     u = cuda_free / cuda_t;
-    if (u > 0.85) u = 0.85;
-    if (u < 0.60) u = 0.60;
+    if (u > 0.90) u = 0.90;
+    if (u < 0.82) u = 0.82;
     printf "%.2f", u;
 }')
 
 # Fallback if the query produced garbage
 if [ -z "$GMEM" ] || [ "$FREE_MIB" = "0" ]; then
-    echo "[122B auto-gmem] WARNING: VRAM query failed, falling back to gmem=0.75"
-    GMEM="0.75"
+    echo "[122B auto-gmem] WARNING: VRAM query failed, falling back to gmem=0.85"
+    GMEM="0.85"
 fi
 
 echo "[122B auto-gmem] nvidia-smi free=${FREE_MIB} MiB / total=${TOTAL_MIB} MiB → gpu_memory_utilization=${GMEM}"
