@@ -2,8 +2,17 @@ version: '3.8'
 
 # ==============================================================================
 # DGX SPARK / GRACE-BLACKWELL OPTIMIZED AI ORCHESTRATION STACK
-# Rename this file to `docker-compose.yml` and replace <PLACEHOLDERS>
+# 
+# SETUP INSTRUCTIONS:
+# 1. Replace all <PLACEHOLDERS> below with your actual values
+# 2. Rename this file to `docker-compose.yml`
+# 3. Run: docker compose up -d
 # ==============================================================================
+
+# IMPORTANT PATHS TO UPDATE:
+# Set these to your actual directories:
+# - LLM_ROOT_PATH: Where your model files are stored (e.g., /home/YOUR_USER/LLMs)
+# - REPO_CONFIG_PATH: Where this repo is cloned (e.g., /home/YOUR_USER/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama)
 
 services:
   # ==========================================
@@ -29,8 +38,9 @@ services:
       - "18080:18080"
       
     volumes:
-      # Maps your local models folder to the container
-      - ./models/ollama:/models/ollama
+      # Maps your GGUF models folder to the container
+      # Replace <LLM_ROOT_PATH> with your actual path
+      - <LLM_ROOT_PATH>/ollama:/models/ollama
 
     deploy:
       resources:
@@ -81,7 +91,8 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ./models/ollama:/root/.ollama
+      # Replace <LLM_ROOT_PATH> with your actual path
+      - <LLM_ROOT_PATH>/ollama:/root/.ollama
       
     deploy:
       resources:
@@ -128,10 +139,13 @@ services:
       start_period: 40s
       
     volumes:
-      - ./llama-swap/config.yaml:/app/config.yaml
+      # Replace <REPO_CONFIG_PATH> with your repo path
+      - <REPO_CONFIG_PATH>/llama-swap/config.yaml:/app/config.yaml
+      - <REPO_CONFIG_PATH>/llama-swap/scripts:/app/scripts
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/bin/docker
-      - ./models:/models
+      # Replace <LLM_ROOT_PATH> with your models path
+      - <LLM_ROOT_PATH>:/models
 
     deploy:
       resources:
@@ -144,7 +158,7 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - GITHUB_TOKEN=<YOUR_GITHUB_TOKEN> # CHANGE ME (Required to pull models if using GHCR)
+      - GITHUB_TOKEN=<YOUR_GITHUB_PAT> # CHANGE ME (Required for private GHCR repos)
     networks:
       - dgx_net
 
@@ -184,7 +198,8 @@ services:
       - LITELLM_MASTER_KEY=<YOUR_LITELLM_MASTER_KEY> # CHANGE ME
 
     volumes:
-      - ./LiteLLM/config.yaml:/app/config.yaml
+      # Replace <REPO_CONFIG_PATH> with your repo path
+      - <REPO_CONFIG_PATH>/LiteLLM/config.yaml:/app/config.yaml
       
     command: 
       - "--config" 

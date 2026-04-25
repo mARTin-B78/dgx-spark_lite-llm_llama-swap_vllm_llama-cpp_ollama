@@ -96,7 +96,7 @@ Measured with [llama-benchy](https://github.com/eugr/llama-benchy) by [@eugr](ht
 - Docker + NVIDIA Container Runtime (`nvidia-container-runtime` as default runtime in `/etc/docker/daemon.json`)
 - Portainer (optional but recommended for managing the stack)
 - GitHub account with a Personal Access Token (PAT) for GHCR image publishing
-- `huggingface-cli` for model downloads
+- `huggingface-hub` for model downloads (via `hf download` command-line tool, or `pip install huggingface-hub[cli]`)
 
 ```json
 // /etc/docker/daemon.json
@@ -139,6 +139,20 @@ cp .env.sample .env
 #   POSTGRES_PASSWORD=choose-a-db-password
 ```
 
+### About GitHub Personal Access Token (PAT)
+
+You need a GitHub PAT to push Docker images to GitHub Container Registry (GHCR). **Why?**
+- `build_and_push.sh` builds 5 base Docker images and publishes them to your GHCR account
+- This lets you store pre-built images so you don't have to recompile from scratch
+- Other users/machines can then pull your images
+
+**What permissions does it need?**
+- Scope: `write:packages` (to push container images)
+- No need for repo code access — only container registry write permissions
+
+**Can you skip it?**
+Yes, if you want to build everything locally and not use GHCR. Edit `build_and_push.sh` and replace the push step with a local tag (e.g., `docker tag llama-cpp-spark llama-cpp-spark:latest`). However, this means each model launcher will need a clone of this repo.
+
 ---
 
 ## Step 2 — Build and Push the Base Images
@@ -167,9 +181,15 @@ bash build_and_push.sh
 >
 > The build system in `vllm/build/spark-vllm-docker/` downloads pre-built vLLM + FlashInfer wheels from eugr's GitHub releases. These wheels are compiled specifically for the GB10 (CUDA 13.1, SM12.1a, ARM64 SBSA) and updated regularly. Without them, every build requires compiling FlashInfer and vLLM from source — a 2–4 hour process. The build script automatically falls back to source compilation if the pre-built wheels aren't available or if you pass `--rebuild-vllm`/`--rebuild-flashinfer`. Thank you @eugr for maintaining this — it makes iterating on the stack practical.
 
-The `build_and_push.sh`'s `vllm-spark` image is a lightweight wrapper. For actually serving models you need the purpose-built images from `vllm/build/spark-vllm-docker/`:
+The `build_and_push.sh`'s `vllm-spark` image is a lightweight wrapper. For actually serving models you need the purpose-built images from `vllm/build/spark-vllm-docker/`.
+
+**Note:** If the `vllm/build/spark-vllm-docker/` folder doesn't exist after cloning, you need to fetch eugr's spark-vllm-docker submodule:
 
 ```bash
+# From the repo root, initialize submodules
+git submodule update --init --recursive
+
+# Then navigate to the build folder
 cd vllm/build/spark-vllm-docker
 ```
 
@@ -208,47 +228,52 @@ Build times on the GB10 using @eugr's pre-built wheels: ~15 minutes. From source
 Install the HuggingFace CLI:
 
 ```bash
-pip install huggingface-hub
+pip install huggingface-hub[cli]
 ```
 
-Download each model into the directory structure expected by the config. Replace `$LLM_ROOT_PATH` with your actual path (e.g. `/home/YOUR_USER/LLMs`):
+Download each model into the directory structure expected by the config. Replace `$LLM_ROOT_PATH` with your actual path (e.g. `/home/YOUR_USER/LLMs`).
+
+**Note:** `huggingface-cli` is deprecated. Use `hf download` instead:
 
 ```bash
 BASE=$LLM_ROOT_PATH/vllm
 
 # --- S tier ---
-huggingface-cli download nvidia/Nemotron-3-Nano-4B-FP8 \
+hf download nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8 \
   --local-dir $BASE/Nvidia/Nemotron-3-Nano-4B-FP8
-huggingface-cli download nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 \
+hf download nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 \
   --local-dir $BASE/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4
-huggingface-cli download Intel/Qwen3-Coder-Next-int4-AutoRound \
+hf download Intel/Qwen3-Coder-Next-int4-AutoRound \
   --local-dir $BASE/Alibaba/Qwen3-Coder-Next-int4-AutoRound
 
 # --- M tier ---
-huggingface-cli download Qwen/Qwen3.5-35B-A3B-FP8 \
+hf download Qwen/Qwen3.5-35B-A3B-FP8 \
   --local-dir $BASE/Alibaba/Qwen3.5-35B-A3B-FP8
-huggingface-cli download Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 \
+hf download Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 \
   --local-dir $BASE/Alibaba/Qwen3-VL-30B-A3B-Instruct-FP8
-huggingface-cli download Qwen/Qwen3-Omni-30B-A3B-Instruct \
+hf download Qwen/Qwen3-Omni-30B-A3B-Instruct \
   --local-dir $BASE/Alibaba/Qwen3-Omni-30B-A3B-Instruct
-huggingface-cli download Qwen/Qwen3-Coder-Next-FP8-Dynamic \
+hf download unsloth/Qwen3-Coder-Next-FP8-Dynamic \
   --local-dir $BASE/Alibaba/Qwen3-Coder-Next-FP8-Dynamic
-huggingface-cli download mistralai/Mistral-Small-24B-Instruct-2501 \
+hf download mistralai/Mistral-Small-24B-Instruct-2501 \
   --local-dir $BASE/Mistral/Mistral-Small-24B-Instruct-2501
 
 # --- L tier ---
-huggingface-cli download Intel/Qwen3.5-122B-A10B-int4-AutoRound \
+hf download Intel/Qwen3.5-122B-A10B-int4-AutoRound \
   --local-dir $BASE/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound
-huggingface-cli download nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
+hf download nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
   --local-dir $BASE/Nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
-huggingface-cli download openai/gpt-oss-120b \
+hf download openai/gpt-oss-120b \
   --local-dir $BASE/OpenAI/GPT-OSS-120B
 
 # --- GGUF (llama.cpp) ---
-huggingface-cli download HauhauCS/Qwen3.5-35B-A3B-Uncensored-Aggressive \
-  --include "*.gguf" --include "*.jinja" \
+# Downloads all quantized variants (100+ GB). For faster setup, pick ONE quant variant:
+hf download HauhauCS/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive \
+  --include "*Q4_K_M*" --include "*.jinja" \
   --local-dir $LLM_ROOT_PATH/ollama/Alibaba/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive
 ```
+
+**Tip for GGUF models:** The `--include` filter prevents downloading all quantization variants (Q2, Q3, Q4, Q5, Q6, etc.). Using `*Q4_K_M*` downloads only the Q4_K_M (medium) variant, which balances quality and VRAM.
 
 ---
 
