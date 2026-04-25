@@ -11,6 +11,7 @@ openclaw/
 # --- Build Artifacts & Output ---
 vllm/build/
 test-results/
+FORUM_UPDATE.md
 
 # --- IDE & Tool Config ---
 .claude/
