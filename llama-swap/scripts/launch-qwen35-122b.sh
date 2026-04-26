@@ -26,27 +26,28 @@ TOTAL_MIB=$(echo "$MEM_LINE" | awk -F',' '{gsub(/ /,"",$2); print $2+0}')
 # CUDA only sees 121.69 GiB (124610 MiB) — the difference is OS/driver overhead.
 # We compute against CUDA's view so the result matches vLLM's startup check.
 #   gmem = (free_nv - nvcuda_overhead - safety) / cuda_total
-#   clamped to [0.82, 0.90]
+#   clamped to [0.78, 0.85]
 #
-# Floor raised to 0.82 because this 122B model needs:
-#   weights 62.65 GiB + compile/activations ~12 GiB + KV cache for 131k ctx
-# Anything below ~0.82 leaves negative KV cache memory and vLLM refuses to start.
-GMEM=$(awk -v f="$FREE_MIB" -v t_nv="$TOTAL_MIB" 'BEGIN {
-    cuda_t  = 124610;
-    safety  = 3072;
-    overhead = (t_nv > cuda_t) ? t_nv - cuda_t : 0;
-    cuda_free = f - overhead - safety;
-    if (cuda_free < 0) cuda_free = 0;
-    u = cuda_free / cuda_t;
-    if (u > 0.90) u = 0.90;
-    if (u < 0.82) u = 0.82;
-    printf "%.2f", u;
-}')
-
-# Fallback if the query produced garbage
-if [ -z "$GMEM" ] || [ "$FREE_MIB" = "0" ]; then
-    echo "[122B auto-gmem] WARNING: VRAM query failed, falling back to gmem=0.85"
-    GMEM="0.85"
+# Floor=0.78 because observed residual CUDA memory holds ~23 GiB at launch,
+# leaving only ~98 GiB free. At 0.78 vLLM requests ~94.9 GiB which fits,
+# and leaves ~20 GiB for KV cache after 62.65 GiB weights + ~12 GiB overhead.
+# Use numeric comparison for fallback — empty-string compare was unreliable.
+FREE_NUM=${FREE_MIB:-0}
+if [ "${FREE_NUM}" -lt 1000 ] 2>/dev/null; then
+    echo "[122B auto-gmem] WARNING: VRAM query returned ${FREE_MIB:-empty}, falling back to gmem=0.80"
+    GMEM="0.80"
+else
+    GMEM=$(awk -v f="$FREE_MIB" -v t_nv="$TOTAL_MIB" 'BEGIN {
+        cuda_t  = 124610;
+        safety  = 3072;
+        overhead = (t_nv > cuda_t) ? t_nv - cuda_t : 0;
+        cuda_free = f - overhead - safety;
+        if (cuda_free < 0) cuda_free = 0;
+        u = cuda_free / cuda_t;
+        if (u > 0.85) u = 0.85;
+        if (u < 0.78) u = 0.78;
+        printf "%.2f", u;
+    }')
 fi
 
 echo "[122B auto-gmem] nvidia-smi free=${FREE_MIB} MiB / total=${TOTAL_MIB} MiB → gpu_memory_utilization=${GMEM}"
@@ -60,6 +61,7 @@ exec docker run --rm --name "vllm-qwen3.5-122b-${PORT}" \
     vllm-node-tf5:latest \
     vllm serve /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound \
     --served-model-name Qwen3.5-122B-A10B-int4-AutoRound \
+    --chat-template /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound/chat_template-tool-strict.jinja \
     --host "${HOST}" --port "${PORT}" \
     --gpu-memory-utilization "${GMEM}" \
     --max-model-len 131072 \
@@ -74,4 +76,5 @@ exec docker run --rm --name "vllm-qwen3.5-122b-${PORT}" \
     --enable-prefix-caching \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
-    --reasoning-parser qwen3
+    --reasoning-parser qwen3 \
+    --default-chat-template-kwargs '{"enable_thinking": true}'
