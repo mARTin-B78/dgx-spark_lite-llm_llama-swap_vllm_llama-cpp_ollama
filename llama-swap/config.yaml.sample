@@ -45,20 +45,21 @@ groups:
 
   # S — Small / fast models: 4B–30B quantized
   small-models:
-    swap: false
-    exclusive: false
+    swap: true
+    exclusive: true
     members:
       - Nemotron-3-Nano-4B-FP8
       - Nemotron-3-Nano-30B-A3B-NVFP4
       - Qwen3-Coder-Next-int4-AutoRound
-      - Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF
+      - Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive
 
   # M — Medium models: 30B FP8 / 24B BF16
   medium-models:
-    swap: false
-    exclusive: false
+    swap: true
+    exclusive: true
     members:
       - Qwen3.5-35B-A3B-FP8
+      - Qwen3.6-35B-A3B-FP8
       - Qwen3-VL-30B-A3B-Instruct-FP8
       - Qwen3-Omni-30B-A3B-Instruct
       - Qwen3-Coder-Next-FP8-Dynamic
@@ -128,13 +129,13 @@ models:
       --ulimit memlock=-1 --ulimit stack=67108864
       --security-opt seccomp=unconfined
       -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
-      -v /path/to/LLMs/ollama:/models/ollama
-      ghcr.io/martin-b78/llama-cpp-spark:latest
+      -v <LLM_ROOT_PATH>/ollama:/models/ollama
+      ghcr.io/<YOUR_GITHUB_USER>/llama-cpp-spark:latest
       -m /models/ollama/Alibaba/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf
       --port ${PORT} --host ${host}
       --ctx-size 16384 --n-gpu-layers 99 --parallel 4 --no-mmap
       --chat-template-file /models/ollama/Alibaba/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive/custom_chat_template.jinja
-    cmdStop: "docker stop llamacpp-qwen-${PORT}"
+    cmdStop: \"docker stop llamacpp-qwen-${PORT}\"
 
 
 #  Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-BF16:
