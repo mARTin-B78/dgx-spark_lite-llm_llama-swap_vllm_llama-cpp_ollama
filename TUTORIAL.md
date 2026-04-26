@@ -1,5 +1,13 @@
 # Running a Full Multi-Model LLM Stack on DGX Spark (GB10) — With VRAM Orchestration
 
+> ⚠️ **Two Setup Approaches Available:**
+> 
+> **New users:** Use the automated setup wizard at `./setup/setup.sh` (~5 minutes) — it handles Docker detection, service configuration, credential collection, and automatic file generation.
+> 
+> **Advanced users / Full control:** Follow the detailed manual steps in this guide (~45 minutes) with complete explanations and customization options.
+> 
+> Both approaches produce the same working stack. Choose based on your experience level and preference.
+
 Hey Guys, I (and the AI) have been working on this for quite a while and this is what I have so far.
 Once it is set up it shall make using the LLMs as easy as possible — the loading and unloading is done by llama-swap. No matter if you use vLLM, llama.cpp or Ollama.
 LiteLLM is used to route the LLMs. You can also use it for fallbacks or adding remote models to the stack.
@@ -116,6 +124,51 @@ Create the shared Docker network (one-time):
 ```bash
 docker network create dgx_net
 ```
+
+---
+
+## Two Setup Paths
+
+### 🚀 Quick Start: Automated Setup (~5 minutes)
+
+If you want to get started quickly without worrying about configuration details, use the interactive setup wizard:
+
+```bash
+git clone https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama.git
+cd dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama
+
+# Run the setup wizard
+./setup/setup.sh
+
+# Download models automatically
+./setup/download-models.sh
+
+# Start the stack
+docker compose up -d
+```
+
+The setup wizard will:
+- Detect your Docker installation and NVIDIA runtime
+- Check running services and available ports
+- Offer to resolve any port conflicts
+- Collect your credentials (HuggingFace token, GitHub PAT)
+- Let you select which model tiers to download
+- Auto-generate `.env` and `docker-compose.yml`
+- Create a configuration summary
+
+**This is the recommended path for first-time users.** For documentation and troubleshooting, see [setup/README.md](setup/README.md).
+
+---
+
+### 📖 Detailed Walkthrough: Manual Setup (This Guide)
+
+If you want to understand each component deeply, learn how to customize configurations, or prefer step-by-step control, follow the instructions below. This guide walks through:
+
+1. 9 detailed setup steps with explanations
+2. Model tier system and architecture details
+3. Troubleshooting and tips
+
+**This is the recommended path for advanced users and those who want complete control over configuration.**
 
 ---
 
