@@ -71,7 +71,61 @@ llama-swap groups models into tiers so concurrent loading is safe on 128 GB unif
 
 ---
 
-## Step 1 — Create the Docker network
+## Getting Started
+
+Choose one of two setup paths:
+
+### 🚀 Option 1: Automated Setup (Recommended for First-Time Users)
+
+**Time: ~5 minutes of guided prompts**
+
+The interactive setup wizard handles everything automatically:
+
+```bash
+git clone https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama.git
+cd dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama
+
+# Run the interactive setup wizard
+./setup/setup.sh
+
+# Auto-download models based on your tier selections
+./setup/download-models.sh
+
+# Start the stack
+docker compose up -d
+```
+
+**What the setup.sh script does:**
+- ✅ Verifies Docker & NVIDIA Container Runtime installation
+- ✅ Detects running services and available ports
+- ✅ Guides through service selection (Portainer, LiteLLM, llama.cpp, Ollama, llama-swap)
+- ✅ Collects credentials (HuggingFace token, GitHub PAT)
+- ✅ Auto-resolves port conflicts with custom alternatives
+- ✅ Lets you choose model tiers (S/M/L/GGUF)
+- ✅ Auto-generates `.env` and `docker-compose.yml`
+- ✅ Creates `SETUP_SUMMARY.txt` for reference
+
+**What the download-models.sh script does:**
+- Reads your model tier selections from `.env`
+- Uses `hf download` for resumable, efficient transfers
+- Filters GGUF models to Q4_K_M quantization (saves 70+ GB!)
+- Shows progress and final disk usage
+
+For full docs and troubleshooting, see [setup/README.md](setup/README.md).
+
+---
+
+### 📖 Option 2: Manual Setup (For Advanced Users / Full Control)
+
+**Time: ~45 minutes of manual configuration**
+
+For detailed step-by-step instructions with explanations, see [TUTORIAL.md](TUTORIAL.md).
+
+#### Quick Manual Steps:
+
+**Step 1 — Create the Docker network**
+
+**Step 1 — Create the Docker network**
 
 All containers share one bridge network so they can resolve each other by name (e.g. `http://llama-swap:8080`):
 
@@ -81,42 +135,48 @@ docker network create dgx_net
 
 ---
 
-## Step 2 — Create `.env`
+**Step 2 — Create `.env`
 
 Copy the sample and fill in your values:
 
 ```bash
-cp .env.sample .env
+cp docker-compose.yml.sample docker-compose.yml
 ```
 
-```dotenv
-# .env
-GH_USER=your-github-username
-IMAGE_TAG=latest
+Edit the placeholder values:
+- `<LLM_ROOT_PATH>` → Your model storage path (e.g., `/home/user/LLMs`)
+- `<REPO_CONFIG_PATH>` → Repo root path (e.g., `/home/user/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama`)
+- `<YOUR_GITHUB_PAT>` → Your GitHub Personal Access Token (optional for local builds)
+- `<YOUR_POSTGRES_PASSWORD>` → Choose a secure database password
+- `<YOUR_LITELLM_MASTER_KEY>` → Generate a secure API key (e.g., `sk-randomstring`)
 
-LLM_ROOT_PATH=/home/YOUR_USER/LLMs
-REPO_CONFIG_PATH=/home/YOUR_USER/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama
+For detailed guidance, see [docker-compose.yml.sample](docker-compose.yml.sample) header.
 
-LITELLM_MASTER_KEY=sk-choose-a-secure-key
-POSTGRES_PASSWORD=choose-a-db-password
-DATABASE_URL="postgresql://litellm_admin:choose-a-db-password@127.0.0.1:15432/litellm"
+---
+
+**Step 3 — Initialize Git submodules**
+
+The `vllm/build/spark-vllm-docker` folder is a Git submodule. Initialize it:
+
+```bash
+git submodule update --init --recursive
+cd vllm/build/spark-vllm-docker
 ```
 
 ---
 
-## Step 3 — Build `vllm-node` (standard vLLM)
+**Step 4 — Build `vllm-node` (standard vLLM)
 
 Used for: Qwen3.5-35B-FP8, Mistral-Small-24B, Nemotron-4B-FP8, Nemotron-30B-NVFP4, GPT-OSS-120B, Qwen3-VL, Qwen3-Omni.
 
 ```bash
-cd vllm/build/spark-vllm-docker
 ./build-and-copy.sh
 # Image tag defaults to: vllm-node
 ```
 
 ---
 
-## Step 4 — Build `vllm-node-tf5` (transformers v5, Mamba/hybrid models)
+**Step 5 — Build `vllm-node-tf5` (transformers v5, Mamba/hybrid models)
 
 Required for: Qwen3.5-122B-A10B-int4-AutoRound, Qwen3-Coder-Next, and any other hybrid Mamba architecture.
 
@@ -127,7 +187,7 @@ Required for: Qwen3.5-122B-A10B-int4-AutoRound, Qwen3-Coder-Next, and any other 
 
 ---
 
-## Step 5 — Build `vllm-node-mxfp4` (CUTLASS MXFP4 kernels)
+**Step 6 — Build `vllm-node-mxfp4` (CUTLASS MXFP4 kernels)
 
 Optional. Only needed for GPT-OSS-120B with native MXFP4 quantization (fastest path, ~60 tok/s).
 
@@ -138,71 +198,42 @@ Optional. Only needed for GPT-OSS-120B with native MXFP4 quantization (fastest p
 
 ---
 
-## Step 6 — Download models
+**Step 7 — Download models
 
 Install the HuggingFace CLI if you don't have it:
 
 ```bash
-pip install huggingface-hub
+pip install huggingface-hub[cli]
 ```
 
-Then download each model into the directory structure that matches `LLM_ROOT_PATH`. The paths below correspond to the `config.yaml.sample` — change the base prefix to your `$LLM_ROOT_PATH`.
+Then download models using `hf download`. See [TUTORIAL.md Step 4](TUTORIAL.md#step-4-download-models) for the complete list of model commands.
 
-### vLLM models (safetensors)
-
-```bash
-BASE=$LLM_ROOT_PATH/vllm   # e.g. /home/YOUR_USER/LLMs/vllm
-
-# --- S tier (small / fast) ---
-huggingface-cli download nvidia/Nemotron-3-Nano-4B-FP8 \
-  --local-dir $BASE/Nvidia/Nemotron-3-Nano-4B-FP8
-
-huggingface-cli download nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 \
-  --local-dir $BASE/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4
-
-huggingface-cli download Intel/Qwen3-Coder-Next-int4-AutoRound \
-  --local-dir $BASE/Alibaba/Qwen3-Coder-Next-int4-AutoRound
-
-# --- M tier (medium) ---
-huggingface-cli download Qwen/Qwen3.5-35B-A3B-FP8 \
-  --local-dir $BASE/Alibaba/Qwen3.5-35B-A3B-FP8
-
-huggingface-cli download Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 \
-  --local-dir $BASE/Alibaba/Qwen3-VL-30B-A3B-Instruct-FP8
-
-huggingface-cli download Qwen/Qwen3-Omni-30B-A3B-Instruct \
-  --local-dir $BASE/Alibaba/Qwen3-Omni-30B-A3B-Instruct
-
-huggingface-cli download Qwen/Qwen3-Coder-Next-FP8-Dynamic \
-  --local-dir $BASE/Alibaba/Qwen3-Coder-Next-FP8-Dynamic
-
-huggingface-cli download mistralai/Mistral-Small-24B-Instruct-2501 \
-  --local-dir $BASE/Mistral/Mistral-Small-24B-Instruct-2501
-
-# --- L tier (large / solo) ---
-huggingface-cli download Intel/Qwen3.5-122B-A10B-int4-AutoRound \
-  --local-dir $BASE/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound
-
-huggingface-cli download nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
-  --local-dir $BASE/Nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
-
-huggingface-cli download openai/gpt-oss-120b \
-  --local-dir $BASE/OpenAI/GPT-OSS-120B
-```
-
-### GGUF models (llama.cpp)
+Quick example:
 
 ```bash
-BASE=$LLM_ROOT_PATH/ollama   # e.g. /home/YOUR_USER/LLMs/ollama
+BASE=$LLM_ROOT_PATH/vllm
 
-huggingface-cli download HauhauCS/Qwen3.5-35B-A3B-Uncensored-Aggressive \
-  --include "*.gguf" --include "*.jinja" \
-  --local-dir $BASE/Alibaba/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive
+# Small models (S tier)
+hf download nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8 \
+  --repo-type model --local-dir $BASE/Nvidia/Nemotron-3-Nano-4B-FP8
+
+# Medium models (M tier)
+hf download meta-llama/Llama-3.1-34B-Instruct \
+  --repo-type model --local-dir $BASE/Meta/Llama-3.1-34B-Instruct
+
+# Large models (L tier)
+hf download meta-llama/Llama-3.3-70B-Instruct \
+  --repo-type model --local-dir $BASE/Meta/Llama-3.3-70B-Instruct
+
+# GGUF models (llama.cpp - Q4_K_M only)
+hf download lmstudio-community/Meta-Llama-3.1-70B-Instruct-GGUF \
+  --repo-type model --include "*Q4_K_M*" \
+  --local-dir $BASE/../gguf/Meta-Llama-3.1-70B-Instruct-GGUF
 ```
 
 ---
 
-## Step 7 — Configure llama-swap
+**Step 8 — Configure llama-swap
 
 Copy the full sample config (it contains all models pre-configured with correct paths):
 
@@ -226,7 +257,7 @@ See [llama-swap/config.yaml.sample](llama-swap/config.yaml.sample) for the compl
 
 ---
 
-## Step 8 — Configure LiteLLM
+**Step 9 — Configure LiteLLM
 
 Copy the sample and update your master key:
 
@@ -235,19 +266,189 @@ cp LiteLLM/config.yaml.sample LiteLLM/config.yaml
 sed -i "s|sk-your-litellm-master-key|$LITELLM_MASTER_KEY|g" LiteLLM/config.yaml
 ```
 
-The sample wires every llama-swap model through `http://llama-swap:8080/v1` (Docker DNS) and sets per-model reasoning flags:
+The sample wires every llama-swap model through `http://llama-swap:8080/v1` (Docker DNS) and sets per-model reasoning flags.
 
-| Model | `supports_reasoning` | `merge_reasoning_content_in_choices` |
+---
+
+**Step 10 — Start the stack
+
+All containers are defined in `docker-compose.yml`. Start them:
+
+```bash
+docker compose up -d
+```
+
+Verify services are running:
+
+```bash
+docker compose ps
+```
+
+Expected output shows all services running (LiteLLM, llama-swap, Ollama, PostgreSQL, etc.).
+
+---
+
+**Step 11 — Test the API
+
+```bash
+# List available models
+curl http://localhost:14000/v1/models \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+
+# Make a test completion request
+curl http://localhost:14000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -d '{
+    "model": "Nemotron-4B-FP8",
+    "messages": [{"role": "user", "content": "Hello, what is 2+2?"}],
+    "max_tokens": 100
+  }'
+```
+
+---
+
+**Step 12 — View logs
+
+Monitor the stack in real-time:
+
+```bash
+docker compose logs -f
+
+# Specific service logs
+docker compose logs -f litellm
+docker compose logs -f llama-swap
+docker compose logs -f llama-cpp  # If installed
+```
+
+---
+
+## Need More Details?
+
+For the full narrative walkthrough with benchmark numbers and deeper explanations, see [TUTORIAL.md](TUTORIAL.md).
+
+---
+
+## Model tier system
+
+llama-swap groups models into tiers so concurrent loading is safe on 128 GB unified memory (~108 GB available after OS):
+
+| Tier | gpu_mem | VRAM each | Max concurrent | Examples |
+|---|---|---|---|---|
+| **S** Small | 0.12–0.22 | 15–28 GB | 4× | Nemotron-4B-FP8, Qwen3.5-35B-GGUF |
+| **M** Medium | 0.40 | ~51 GB | 2× | Qwen3.5-35B-FP8, Mistral-Small-24B |
+| **L** Large | 0.70–0.85 | ~90–109 GB | 1× (solo) | Qwen3.5-122B, Nemotron-120B, GPT-OSS-120B |
+
+`exclusive: true` on the L-tier means loading any large model automatically evicts all others.
+
+---
+
+## Stack architecture reference
+
+```
+Client (Claude Code / Open WebUI / curl)
+        │
+        ▼  :14000 (OpenAI-compatible)
+  ┌─────────────┐
+  │   LiteLLM   │  ◄── unified gateway, auth, routing
+  └──────┬──────┘
+         │ routes by model name
+         ▼ :28080
+  ┌─────────────┐
+  │ llama-swap  │  ◄── VRAM orchestrator (docker.sock)
+  └──────┬──────┘
+         │ spawns on demand
+    ┌────┼──────────────────────┐
+    ▼    ▼                      ▼
+ vllm  llama.cpp             Ollama
+ :PORT :PORT                 :11434
+(ephemeral model containers)
+```
+
+| Service | Host port | Role |
 |---|---|---|
-| Qwen3.5-35B-FP8 | true | true |
-| Qwen3.5-122B-int4 | true | false (separate `reasoning` field) |
-| Qwen3-Omni / Qwen3-Coder | true | true |
-| Qwen3-VL | false | — |
-| Nemotron-4B-FP8 | false | — |
-| Nemotron-30B-NVFP4 | true | true |
-| Nemotron-Super-120B | true | true |
-| GPT-OSS-120B | true | true |
-| Mistral-Small-24B | false | — |
+| LiteLLM | 14000 | API gateway |
+| llama-swap | 28080 | VRAM orchestrator |
+| Ollama | 11434 | GGUF / Ollama models |
+| llama.cpp (persistent) | 19000 | GGUF engine |
+| vLLM (persistent) | 18000 | Safetensors engine |
+| LiteLLM DB (Postgres) | 15432 | LiteLLM backend |
+
+---
+
+## Troubleshooting
+
+### Setup script won't run
+```bash
+chmod +x setup/setup.sh
+./setup/setup.sh
+```
+
+### Port already in use
+The automated setup script auto-detects ports. If a port is taken, it will prompt for an alternative. For manual setup, edit `docker-compose.yml` port mappings.
+
+### Docker daemon not running
+```bash
+sudo systemctl start docker
+```
+
+### NVIDIA Container Runtime not found
+Check your `/etc/docker/daemon.json` includes:
+```json
+{
+  "default-runtime": "nvidia"
+}
+```
+
+Then restart Docker:
+```bash
+sudo systemctl restart docker
+```
+
+### Models not downloading
+- Ensure `pip install huggingface-hub[cli]` is installed
+- Verify `hf` command works: `hf --version`
+- For faster transfers: `pip install hf-transfer` and set `export HF_HUB_ENABLE_HF_TRANSFER=1`
+
+---
+
+## Additional Resources
+
+- **[TUTORIAL.md](TUTORIAL.md)** — Detailed step-by-step guide with benchmarks
+- **[setup/README.md](setup/README.md)** — Setup wizard documentation and troubleshooting
+- **[setup/setup.sh](setup/setup.sh)** — Interactive configuration wizard
+- **[setup/download-models.sh](setup/download-models.sh)** — Automated model downloader
+- **[docker-compose.yml.sample](docker-compose.yml.sample)** — Service definitions
+- **[llama-swap/config.yaml.sample](llama-swap/config.yaml.sample)** — VRAM orchestrator config
+- **[LiteLLM/config.yaml.sample](LiteLLM/config.yaml.sample)** — API gateway config
+
+---
+
+## Next Steps
+
+1. **Choose your setup path:**
+   - **Automated:** `./setup/setup.sh` (~5 min)
+   - **Manual:** Follow the steps above or [TUTORIAL.md](TUTORIAL.md) (~45 min)
+
+2. **Download models:**
+   - **Automated:** `./setup/download-models.sh`
+   - **Manual:** Use `hf download` commands from Step 7
+
+3. **Start the stack:** `docker compose up -d`
+
+4. **Verify:** `curl http://localhost:14000/v1/models -H "Authorization: Bearer YOUR_KEY"`
+
+---
+
+## What is this?
+
+A production-ready Docker Compose stack that lets a single DGX Spark run **multiple large language models** without manual VRAM juggling. `llama-swap` acts as the orchestrator: it spins up the right inference container on demand and evicts it when idle, so 128 GB is never wasted on a model nobody is using.
+
+A unified **LiteLLM** gateway exposes every model through one OpenAI-compatible endpoint with a single API key — no per-service port juggling.
+
+---
+
+## Stack overview
 
 See [LiteLLM/config.yaml.sample](LiteLLM/config.yaml.sample) for the complete annotated config.
 
