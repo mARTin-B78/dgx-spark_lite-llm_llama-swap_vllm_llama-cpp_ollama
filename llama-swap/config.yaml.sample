@@ -318,8 +318,8 @@ models:
       docker run --rm --name vllm-qwen3-coder-${PORT}
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
       -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
-      -v /path/to/LLMs/vllm:/models/vllm
-      -v /path/to/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro
+      -v <LLM_ROOT_PATH>/vllm:/models/vllm
+      -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro
       --entrypoint /bin/bash
       vllm-node-tf5:latest
       -c "cd /mod && bash run.sh && python3 -m vllm.entrypoints.openai.api_server --model /models/vllm/Alibaba/Qwen3-Coder-Next-FP8-Dynamic --served-model-name Qwen3-Coder-Next-FP8-Dynamic --host ${host} --port ${PORT} --gpu-memory-utilization 0.75 --max-model-len 32768 --kv-cache-dtype fp8 --load-format fastsafetensors --attention-backend flashinfer --tensor-parallel-size 1 --enable-auto-tool-choice --tool-call-parser qwen3_coder"
@@ -339,8 +339,8 @@ models:
       -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
       -e SAFETENSORS_FAST_GPU=1
       -e VLLM_USE_FLASHINFER_MOE_FP8=1
-      -v /path/to/LLMs/vllm:/models/vllm
-      -v /path/to/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro
+      -v <LLM_ROOT_PATH>/vllm:/models/vllm
+      -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro
       --entrypoint /bin/bash
       vllm-node-tf5:latest
       -c "cd /mod && bash run.sh && python3 -m vllm.entrypoints.openai.api_server --model /models/vllm/Alibaba/Qwen3-Coder-Next-int4-AutoRound --served-model-name Qwen3-Coder-Next-int4-AutoRound --enable-auto-tool-choice --tool-call-parser qwen3_coder --gpu-memory-utilization 0.6 --host ${host} --port ${PORT} --load-format fastsafetensors --max-model-len 32768 --language-model-only --enable-chunked-prefill --max-num-batched-tokens 49152 --max-num-seqs 384 --kv-cache-dtype fp8 --optimization-level 3 --performance-mode throughput"
@@ -356,7 +356,7 @@ models:
       docker run --rm --name vllm-nano4b-${PORT}
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
       -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
-      -v /path/to/LLMs/vllm:/models/vllm
+      -v <LLM_ROOT_PATH>/vllm:/models/vllm
       spark-vllm:Version_1
       vllm serve /models/vllm/Nvidia/Nemotron-3-Nano-4B-FP8
       --served-model-name Nemotron-3-Nano-4B-FP8
@@ -382,7 +382,7 @@ models:
       -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
       -e VLLM_USE_FLASHINFER_MOE_FP4=1
       -e VLLM_FLASHINFER_MOE_BACKEND=throughput
-      -v /path/to/LLMs/vllm:/models/vllm
+      -v <LLM_ROOT_PATH>/vllm:/models/vllm
       vllm-node:Version_1
       vllm serve /models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
       --served-model-name Nemotron-3-Nano-30B-A3B-NVFP4
@@ -410,7 +410,7 @@ models:
       -e VLLM_FLASHINFER_ALLREDUCE_BACKEND=trtllm
       -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
       -e RAY_memory_monitor_refresh_ms=0
-      -v /path/to/LLMs/vllm:/models/vllm
+      -v <LLM_ROOT_PATH>/vllm:/models/vllm
       spark-vllm:Version_1
       vllm serve /models/vllm/Nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
       --served-model-name Nemotron-3-Super-120B-A12B-NVFP4
@@ -442,7 +442,7 @@ models:
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
       -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
       -e VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=1
-      -v /path/to/LLMs/vllm:/models/vllm 
+      -v <LLM_ROOT_PATH>/vllm:/models/vllm 
       vllm-node-mxfp4
       vllm serve /models/vllm/OpenAI/GPT-OSS-120B/hub/models--openai--gpt-oss-120b/snapshots/b5c939de8f754692c1647ca79fbf85e8c1e70f8a
       --served-model-name GPT-OSS-120B
@@ -466,7 +466,7 @@ models:
       docker run --rm --name vllm-mistral-small-${PORT} 
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
       -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
-      -v /path/to/LLMs/vllm:/models/vllm 
+      -v <LLM_ROOT_PATH>/vllm:/models/vllm 
       vllm-node:Version_1
       vllm serve /models/vllm/Mistral/Mistral-Small-24B-Instruct-2501
       --served-model-name Mistral-Small-24B-Instruct-2501
