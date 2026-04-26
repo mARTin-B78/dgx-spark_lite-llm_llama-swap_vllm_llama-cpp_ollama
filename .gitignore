@@ -13,6 +13,9 @@ vllm/build/
 test-results/
 FORUM_UPDATE.md
 
+# --- Setup Output (auto-generated, not tracked) ---
+setup/SETUP_SUMMARY.txt
+
 # --- IDE & Tool Config ---
 .claude/
 
