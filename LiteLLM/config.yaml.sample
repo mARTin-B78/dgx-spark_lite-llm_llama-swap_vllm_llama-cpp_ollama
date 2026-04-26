@@ -5,7 +5,7 @@ general_settings:
   # ===================================================
   master_key: "sk-your-litellm-master-key" 
   ui_username: "admin"
-  ui_password: "your-ui-password"
+  ui_password: "your-secure-ui-password"
   ui_access_mode: "admin_only"
   disable_master_key_return: true
   allow_model_creation: false
@@ -31,13 +31,12 @@ model_list:
 #    # api_base: "http://llama-swap:8080/v1"
 #      api_key: "sk-your-litellm-master-key"
 
-  - model_name: Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF
+  - model_name: Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive
     litellm_params:
-      model: openai/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF
+      model: openai/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive
     # api_base: "http://ollama:11434/v1"
       api_base: "http://llama-swap:8080/v1"
       api_key: "sk-your-litellm-master-key"
-   #  max_tokens: 4096
       max_tokens: 32768
       roles:
         system: "user"
@@ -58,7 +57,7 @@ model_list:
   # 🦙 LLAMA-SWAP MODELS (DGX Local)
   # ===================================================
 
-# --- Qwen 3.5 Series (Native Reasoning) ---
+# --- Qwen 3.5/3.6 Series (Reasoning Models) ---
   - model_name: Qwen3.5-35B-A3B-FP8
     litellm_params:
       model: openai/Qwen3.5-35B-A3B-FP8
@@ -67,12 +66,21 @@ model_list:
       drop_params: true
       include_reasoning: true 
       supports_reasoning: true
-      # This ensures the <think> tags stay in the text stream
       merge_reasoning_content_in_choices: true
       extra_body:
-        enable_thinking: true  # Specific for Qwen 3.5 vLLM deployments
-        chat_template_kwargs: {"enable_thinking": true}
-      max_tokens: 4096 # Changed from 8192 to allow more input tokens
+        enable_thinking: true
+      max_tokens: 4096
+
+  - model_name: Qwen3.6-35B-A3B-FP8
+    litellm_params:
+      model: openai/Qwen3.6-35B-A3B-FP8
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "sk-your-litellm-master-key"
+      drop_params: true
+      include_reasoning: true
+      supports_reasoning: true
+      merge_reasoning_content_in_choices: true
+      max_tokens: 4096
 
 # --- Qwen 3.5 Series (Heavy thinker Reasoning) ---
   - model_name: Qwen3.5-122B-A10B-int4-AutoRound
