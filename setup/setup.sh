@@ -113,8 +113,13 @@ else
 fi
 
 # Check NVIDIA Container Runtime
-if docker run --rm --runtime=nvidia nvidia/cuda:11.0-runtime nvidia-smi &>/dev/null; then
-    print_success "NVIDIA Container Runtime is configured"
+# Ask Docker directly instead of pulling a test image — `nvidia/cuda:11.0-runtime`
+# has no arm64 variant and is too old for Blackwell, so it would falsely fail on the GB10.
+if docker info 2>/dev/null | grep -qE '^\s*Default Runtime:\s*nvidia\b'; then
+    print_success "NVIDIA Container Runtime is configured (default runtime: nvidia)"
+elif docker info 2>/dev/null | grep -qE '^\s*Runtimes:.*\bnvidia\b'; then
+    print_warning "NVIDIA runtime is registered but is not the default runtime"
+    print_info "Containers must be started with --runtime=nvidia, or set 'default-runtime': 'nvidia' in /etc/docker/daemon.json."
 else
     print_warning "NVIDIA Container Runtime not configured or not available"
     print_info "This is required to give containers GPU access on the GB10."
@@ -317,19 +322,19 @@ print_header "Step 10: Model Selection"
 echo "Select which model tiers to configure:"
 echo ""
 
-read -p "$(echo -e ${BLUE}Install S tier (4B-30B small/fast models)? (y/n): ${NC})" -n 1 -r
+read -p "$(echo -e "${BLUE}Install S tier (4B-30B small/fast models)? (y/n): ${NC}")" -n 1 -r
 echo
 INSTALL_S_TIER=$([[ $REPLY =~ ^[Yy]$ ]] && echo "true" || echo "false")
 
-read -p "$(echo -e ${BLUE}Install M tier (30B-35B medium models)? (y/n): ${NC})" -n 1 -r
+read -p "$(echo -e "${BLUE}Install M tier (30B-35B medium models)? (y/n): ${NC}")" -n 1 -r
 echo
 INSTALL_M_TIER=$([[ $REPLY =~ ^[Yy]$ ]] && echo "true" || echo "false")
 
-read -p "$(echo -e ${BLUE}Install L tier (120B+ large models)? (y/n): ${NC})" -n 1 -r
+read -p "$(echo -e "${BLUE}Install L tier (120B+ large models)? (y/n): ${NC}")" -n 1 -r
 echo
 INSTALL_L_TIER=$([[ $REPLY =~ ^[Yy]$ ]] && echo "true" || echo "false")
 
-read -p "$(echo -e ${BLUE}Install GGUF variants (llama.cpp models)? (y/n): ${NC})" -n 1 -r
+read -p "$(echo -e "${BLUE}Install GGUF variants (llama.cpp models)? (y/n): ${NC}")" -n 1 -r
 echo
 INSTALL_GGUF=$([[ $REPLY =~ ^[Yy]$ ]] && echo "true" || echo "false")
 
