@@ -198,6 +198,7 @@ models:
   # --- Optimized: MTP-2 + FLASHINFER + chunked prefill + enhanced template ---
   Qwen3.5-35B-A3B-FP8:
     ttl: 600
+    checkEndpoint: "/health"
     cmd: >
       docker run --rm --name vllm-qwen3.5-35b-${PORT}
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
@@ -234,6 +235,7 @@ models:
   Qwen3.5-122B-A10B-int4-AutoRound:
     ttl: 3600
     readyTimeout: 1800
+    checkEndpoint: "/health"
     cmd: >
       docker run --rm --name vllm-qwen3.5-122b-${PORT}
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
@@ -261,7 +263,8 @@ models:
 
   # --- Works - is for Visual Stuff with Pictures ---
   Qwen3-VL-30B-A3B-Instruct-FP8:
-    ttl: 600 
+    ttl: 600
+    checkEndpoint: "/health"
     cmd: >
       docker run --rm --name vllm-qwen3-vl-${PORT} 
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
@@ -286,7 +289,8 @@ models:
 
   # --- Works - is for Pictures, Sound, Text ---
   Qwen3-Omni-30B-A3B-Instruct:
-    ttl: 600 
+    ttl: 600
+    checkEndpoint: "/health"
     cmd: >
       docker run --rm --name vllm-qwen3-omni-${PORT} 
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
@@ -314,6 +318,7 @@ models:
   Qwen3-Coder-Next-FP8-Dynamic:
     ttl: 3600
     readyTimeout: 1200
+    checkEndpoint: "/health"
     cmd: >
       docker run --rm --name vllm-qwen3-coder-${PORT}
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
@@ -330,6 +335,7 @@ models:
   Qwen3-Coder-Next-int4-AutoRound:
     ttl: 3600
     readyTimeout: 1200
+    checkEndpoint: "/health"
     cmd: >
       docker run --rm --name vllm-qwen3-coder-ar-${PORT}
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
@@ -376,6 +382,7 @@ models:
   Nemotron-3-Nano-30B-A3B-NVFP4:
     ttl: 300
     readyTimeout: 600
+    checkEndpoint: "/health"
     cmd: >
       docker run --rm --name vllm-nemotron-${PORT}
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
@@ -401,8 +408,9 @@ models:
 
 # --- NVIDIA Nemotron-3 Super (120B MoE - Blackwell Optimized NVFP4) ---
   Nemotron-3-Super-120B-A12B-NVFP4:
-    ttl: 3600          
-    readyTimeout: 1800 
+    ttl: 3600
+    readyTimeout: 1800
+    checkEndpoint: "/health"
     cmd: >
       docker run --rm --name vllm-nemotron-super-${PORT}
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap --shm-size=64g
@@ -437,6 +445,7 @@ models:
   GPT-OSS-120B:
     ttl: 3600
     readyTimeout: 1200
+    checkEndpoint: "/health"
     cmd: >
       docker run --rm --name vllm-gptoss-${PORT} 
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
@@ -462,6 +471,7 @@ models:
   # --- Works - is for fast Roleplay or Text based Stuff ---
   Mistral-Small-24B-Instruct-2501:
     ttl: 600
+    checkEndpoint: "/health"
     cmd: >
       docker run --rm --name vllm-mistral-small-${PORT} 
       --runtime nvidia --gpus all --ipc=host --network container:llama-swap
