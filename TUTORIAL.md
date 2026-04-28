@@ -436,88 +436,73 @@ See [LiteLLM/config.yaml.sample](LiteLLM/config.yaml.sample) for all models with
 
 ---
 
-## Step 6 — Dynamic VRAM Launcher for Large Models
+## Step 6 — Dynamic VRAM Launcher (any vLLM model)
 
-Large MoE models (120B+ INT4/FP4) hit a recurring failure: after the previous model container exits, the CUDA memory allocator on the unified-memory GB10 doesn't immediately return all memory to the free pool. vLLM's startup check `free_memory >= gpu_memory_utilization × total` fails with a hardcoded high utilization value.
+Two failure modes motivate a wrapper:
 
-The fix is a small wrapper script that queries actual free VRAM at launch time and computes the safe utilization dynamically. Add it to `llama-swap/scripts/` (this directory is mounted into the llama-swap container at `/app/scripts/`):
+1. **Residual CUDA memory after model swap.** On unified-memory GB10, after the previous container exits the CUDA allocator can hold tens of GiB for several seconds. vLLM's startup check `free_memory >= gpu_memory_utilization × total` then fails with a hardcoded utilization.
+2. **Wrong static value across reboots / different co-resident loads.** A value tuned for an empty GPU is too high on a warm one (and vice versa).
 
-**`llama-swap/scripts/launch-large-model.sh`** — adapt `MODEL_PATH`, container name, and vllm flags for your model:
+The repo ships a **generic adaptive launcher** at [llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) that:
 
-```bash
-#!/bin/bash
-# Dynamically sets --gpu-memory-utilization based on actually-free VRAM at launch time.
-# Usage (from llama-swap cmd): /app/scripts/launch-large-model.sh PORT HOST
-set -euo pipefail
+1. Estimates **weights** from the sum of `*.safetensors` in the model dir.
+2. Estimates **KV cache** from `config.json` (handles nested `text_config` for multimodal models):
+   `kv_bytes ≈ 2 × num_hidden_layers × num_kv_heads × head_dim × max_model_len × max_num_seqs × kv_dtype_bytes`
+3. Adds a `SAFETY_GIB` headroom → `need_gib`.
+4. Queries free/total VRAM via `nvidia-smi` **run inside the same vLLM image** (so it sees CUDA's view, not host unified memory).
+5. Picks `util = need / total`, clamps to `[GMEM_MIN, GMEM_MAX]`, additionally caps at `(free − 1 GiB) / total`. Aborts if not even the cap fits.
 
-PORT="${1}"
-HOST="${2}"
+This means most models can drop hardcoded `--gpu-memory-utilization` entirely.
 
-# Query free/total VRAM via nvidia-smi inside the (already-cached) vllm image.
-# Adds ~3s overhead — negligible vs. the several minutes this model takes to load.
-MEM_LINE=$(docker run --rm --runtime nvidia --gpus all \
-    vllm-node-tf5:latest \
-    sh -c "nvidia-smi --query-gpu=memory.free,memory.total --format=csv,noheaders,nounits | head -1" \
-    2>/dev/null || true)
-
-FREE_MIB=$(echo "$MEM_LINE" | awk -F',' '{gsub(/ /,"",$1); print $1+0}')
-TOTAL_MIB=$(echo "$MEM_LINE" | awk -F',' '{gsub(/ /,"",$2); print $2+0}')
-
-# GB10: nvidia-smi reports 128 GiB (131072 MiB) unified memory;
-# CUDA sees only 121.69 GiB (124610 MiB). Subtract that delta + 3 GiB safety margin
-# so the computed value matches vLLM's view of available memory.
-GMEM=$(awk -v f="$FREE_MIB" -v t_nv="$TOTAL_MIB" 'BEGIN {
-    cuda_t   = 124610;
-    safety   = 3072;
-    overhead = (t_nv > cuda_t) ? t_nv - cuda_t : 0;
-    cuda_free = f - overhead - safety;
-    if (cuda_free < 0) cuda_free = 0;
-    u = cuda_free / cuda_t;
-    if (u > 0.85) u = 0.85;
-    if (u < 0.60) u = 0.60;
-    printf "%.2f", u;
-}')
-
-if [ -z "$GMEM" ] || [ "$FREE_MIB" = "0" ]; then
-    echo "[auto-gmem] WARNING: VRAM query failed, using fallback 0.75"
-    GMEM="0.75"
-fi
-
-echo "[auto-gmem] nvidia-smi free=${FREE_MIB}MiB / total=${TOTAL_MIB}MiB → gpu_memory_utilization=${GMEM}"
-
-exec docker run --rm --name "vllm-mymodel-122b-${PORT}" \
-    --runtime nvidia --gpus all --ipc=host --network container:llama-swap \
-    -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1 \
-    -e VLLM_MARLIN_USE_ATOMIC_ADD=1 \
-    -v /home/YOUR_USER/LLMs/vllm:/models/vllm \
-    vllm-node-tf5:latest \
-    vllm serve /models/vllm/MyOrg/MyModel-122B \
-    --served-model-name MyModel-122B \
-    --host "${HOST}" --port "${PORT}" \
-    --gpu-memory-utilization "${GMEM}" \
-    --max-model-len 131072 \
-    --kv-cache-dtype fp8 \
-    --load-format fastsafetensors \
-    --attention-backend FLASHINFER \
-    --mamba-ssm-cache-dtype float16 \
-    --enable-prefix-caching \
-    --enable-auto-tool-choice \
-    --tool-call-parser qwen3_coder \
-    --reasoning-parser qwen3
-```
-
-```bash
-chmod +x llama-swap/scripts/launch-large-model.sh
-```
-
-Reference it from `llama-swap/config.yaml`:
+**Wire it from `llama-swap/config.yaml`:**
 
 ```yaml
-  MyModel-122B:
+  Qwen3.6-35B-A3B-FP8:
+    ttl: 600
+    readyTimeout: 600
+    checkEndpoint: "/health"
+    cmd: >
+      env
+      MODEL_PATH=/models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
+      MODEL_HOST_PATH=/home/sparky/LLMs/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
+      CONTAINER_NAME=vllm-qwen3.6-35b-${PORT}
+      IMAGE=vllm-node-tf5:latest
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=131072 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
+      GMEM_MIN=0.55 GMEM_MAX=0.85 SAFETY_GIB=4
+      /app/scripts/launch-vllm-auto.sh
+      --served-model-name Qwen3.6-35B-A3B-FP8
+      --chat-template /models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8/chat_template-tool-strict.jinja
+      --max-num-batched-tokens 32768
+      --max-cudagraph-capture-size 10
+      --kv-cache-dtype fp8
+      --load-format fastsafetensors
+      --attention-backend FLASHINFER
+      --enable-prefix-caching
+      --trust-remote-code
+      --mamba-ssm-cache-dtype float16
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_xml
+      --reasoning-parser qwen3
+      --default-chat-template-kwargs '{"enable_thinking": true}'
+    cmdStop: "docker stop vllm-qwen3.6-35b-${PORT}"
+```
+
+**Required env vars:** `MODEL_PATH` (in-container), `MODEL_HOST_PATH` (host — used to read `config.json` and stat safetensors), `CONTAINER_NAME`, `IMAGE`, `PORT`, `HOST`.
+**Tunables:** `MAX_MODEL_LEN`, `MAX_NUM_SEQS`, `KV_DTYPE_BYTES` (1 = fp8, 2 = bf16/fp16), `GMEM_MIN`, `GMEM_MAX`, `SAFETY_GIB`.
+
+Any args after the script name are forwarded verbatim to `vllm serve`.
+
+**Worked example (Qwen3.6-35B-A3B-FP8):** weights = 29.4 GiB; layers = 40, kv_heads = 2, head_dim = 256, ctx = 131072, batch = 10, fp8 KV → kv ≈ 50 GiB; need = 29.4 + 50 + 4 = 83.4 GiB; on 121.69 GiB total → `util ≈ 0.69` (vs. the brittle hardcoded 0.78 that tripped startup when only 91.76 GiB was free).
+
+**122B-specific launcher.** [llama-swap/scripts/launch-qwen35-122b.sh](llama-swap/scripts/launch-qwen35-122b.sh) is the older, model-specific variant kept in place for the INT4 122B model. The generic launcher above can replace it; the dedicated one is left as a known-good reference.
+
+```yaml
+  Qwen3.5-122B-A10B-int4-AutoRound:
     ttl: 3600
     readyTimeout: 1800
-    cmd: /app/scripts/launch-large-model.sh ${PORT} ${host}
-    cmdStop: "docker stop vllm-mymodel-122b-${PORT}"
+    cmd: /app/scripts/launch-qwen35-122b.sh ${PORT} ${host}
+    cmdStop: "docker stop vllm-qwen3.5-122b-${PORT}"
 ```
 
 ---
@@ -746,7 +731,7 @@ The script tests each model sequentially, runs a coherence check to detect repet
 llama-swap assigns ports dynamically from its pool. Make sure the port range in config.yaml doesn't overlap with other services on the host.
 
 **vLLM startup check: `free_memory < gpu_memory_utilization × total`**
-After stopping one model container, the CUDA allocator on unified-memory systems can hold freed memory for several seconds. Use the dynamic launcher script from Step 6 instead of a hardcoded `--gpu-memory-utilization` value for any model over 100B parameters.
+After stopping one model container, the CUDA allocator on unified-memory systems can hold freed memory for several seconds. Replace the hardcoded `--gpu-memory-utilization` with the generic launcher [llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) (Step 6) — it sizes utilization from the model's actual weights+KV need vs. currently free VRAM, so the value adapts whether the GPU is cold or warm.
 
 **Mamba/hybrid models need the tf5 image and an extra flag**
 Models using the Mamba SSM layers (Qwen3.5-122B-A10B, Qwen3.6-35B, Qwen3-Coder-Next) require `vllm-node-tf5:latest` (built with `--tf5`) and `--mamba-ssm-cache-dtype float16` in the vllm serve command.
