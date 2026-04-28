@@ -458,14 +458,36 @@ See [LiteLLM/config.yaml.sample](LiteLLM/config.yaml.sample) for the complete an
 
 For any model that occupies >80 GB, residual CUDA memory from the previous model can cause vLLM's startup sanity check to fail (`free_memory < gpu_memory_utilization × total`).
 
-The included script queries `nvidia-smi` at launch time and computes a safe `--gpu-memory-utilization` dynamically:
+Two launchers are provided:
 
-```bash
-# llama-swap/scripts/launch-qwen35-122b.sh
-# Usage: /app/scripts/launch-qwen35-122b.sh ${PORT} ${host}
+**Generic adaptive launcher** — [llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) — works for any vLLM model. It estimates required VRAM from `weights (safetensors) + KV cache (config.json) + safety` and picks the smallest `--gpu-memory-utilization` that fits, clamped to `[GMEM_MIN, GMEM_MAX]`. Fails fast if even the ceiling cannot fit.
+
+```yaml
+  Qwen3.6-35B-A3B-FP8:
+    ttl: 600
+    readyTimeout: 600
+    checkEndpoint: "/health"
+    cmd: >
+      env
+      MODEL_PATH=/models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
+      MODEL_HOST_PATH=/home/sparky/LLMs/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
+      CONTAINER_NAME=vllm-qwen3.6-35b-${PORT}
+      IMAGE=vllm-node-tf5:latest
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=131072 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
+      GMEM_MIN=0.55 GMEM_MAX=0.85 SAFETY_GIB=4
+      /app/scripts/launch-vllm-auto.sh
+      --served-model-name Qwen3.6-35B-A3B-FP8
+      --kv-cache-dtype fp8
+      --load-format fastsafetensors
+      --attention-backend FLASHINFER
+      --enable-prefix-caching
+    cmdStop: "docker stop vllm-qwen3.6-35b-${PORT}"
 ```
 
-Reference it from `config.yaml`:
+Tunables (env vars): `MAX_MODEL_LEN`, `MAX_NUM_SEQS`, `KV_DTYPE_BYTES` (1 = fp8, 2 = bf16/fp16), `GMEM_MIN`, `GMEM_MAX`, `SAFETY_GIB`.
+
+**122B-specific launcher** — [llama-swap/scripts/launch-qwen35-122b.sh](llama-swap/scripts/launch-qwen35-122b.sh) — used by the 122B INT4 model. Same idea but tuned for that model's known footprint.
 
 ```yaml
   Qwen3.5-122B-A10B-int4-AutoRound:
@@ -624,7 +646,7 @@ bash benchmark-models.sh --endpoint http://localhost:28080
 Every group must be `swap: true` for solo models, or `exclusive: true` for L-tier. On 128 GB unified memory, even two 35B FP8 models at `gpu_mem=0.5` (64 GB each) can exceed safe limits. Tune per-model `gpu_memory_utilization` to fit your concurrent group math.
 
 **vLLM startup check fails: `free_memory < gpu_memory_utilization × total`**
-Use the dynamic launcher script (Step 7) for any L-tier model. It reads `nvidia-smi` at launch time and computes a safe utilization fraction. For M/S tier, `0.40` and `0.20` respectively are reliably safe.
+Use the generic adaptive launcher [llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) for any model where residual CUDA memory might bite — it estimates need from weights+KV+safety, queries free VRAM, and picks a fitting utilization in `[GMEM_MIN, GMEM_MAX]`. The 122B-specific launcher (Step 9) is a tuned variant. For M/S tier, `0.40` and `0.20` respectively are reliably safe as static values.
 
 **Mamba/hybrid models crash at startup**
 Add `--mamba-ssm-cache-dtype float16` and use `vllm-node-tf5` (built with `--tf5`). The standard `vllm-node` image does not include transformers v5 patches required by Mamba hybrid architectures.
