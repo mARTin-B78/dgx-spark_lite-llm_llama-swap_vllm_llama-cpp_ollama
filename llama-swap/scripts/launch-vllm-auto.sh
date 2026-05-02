@@ -26,6 +26,14 @@
 #   SAFETY_GIB       headroom on top of estimate (default 4)
 #   CUDA_OVERHEAD_GIB  GiB of MemTotal not visible to CUDA (default 6.3 for GB10)
 #
+# Optional env:
+#   EXTRA_DOCKER_ARGS  extra `docker run` args, space-separated (mounts, envs).
+#                      Example: "-v /host/mod:/mod:ro -e VLLM_USE_FLASHINFER_MOE_FP8=1"
+#   PRE_LAUNCH_CMD     bash command to execute inside the container before
+#                      `vllm serve`. When set, the launcher uses
+#                      `--entrypoint /bin/bash -c "PRE_LAUNCH_CMD && exec vllm serve …"`.
+#                      Use for image patches, mod scripts, or env setup.
+#
 # Remaining args ($@) are passed verbatim after `vllm serve $MODEL_PATH ...`.
 
 set -euo pipefail
@@ -159,15 +167,42 @@ if [ "$GMEM_MODE" = "fallback" ]; then
 fi
 GMEM="$GMEM_VAL"
 
-exec docker run --rm --name "$CONTAINER_NAME" \
-    --runtime nvidia --gpus all --ipc=host --network container:llama-swap \
-    -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1 \
-    -e VLLM_MARLIN_USE_ATOMIC_ADD=1 \
-    -v /home/sparky/LLMs/vllm:/models/vllm \
-    "$IMAGE" \
-    vllm serve "$MODEL_PATH" \
-    --host "$HOST" --port "$PORT" \
-    --gpu-memory-utilization "$GMEM" \
-    --max-model-len "$MAX_MODEL_LEN" \
-    --max-num-seqs "$MAX_NUM_SEQS" \
+# Common docker args (network, GPU, base mounts/envs).
+DOCKER_BASE=(
+    docker run --rm --name "$CONTAINER_NAME"
+    --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+    -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+    -e VLLM_MARLIN_USE_ATOMIC_ADD=1
+    -v /home/sparky/LLMs/vllm:/models/vllm
+)
+
+# Optional: extra mounts / envs (split on whitespace; preserves order).
+EXTRA_DOCKER_ARGS="${EXTRA_DOCKER_ARGS:-}"
+EXTRA_ARR=()
+[ -n "$EXTRA_DOCKER_ARGS" ] && read -r -a EXTRA_ARR <<< "$EXTRA_DOCKER_ARGS"
+
+# Common vllm args.
+VLLM_ARGS=(
+    vllm serve "$MODEL_PATH"
+    --host "$HOST" --port "$PORT"
+    --gpu-memory-utilization "$GMEM"
+    --max-model-len "$MAX_MODEL_LEN"
+    --max-num-seqs "$MAX_NUM_SEQS"
     "$@"
+)
+
+if [ -n "${PRE_LAUNCH_CMD:-}" ]; then
+    # Build the full command-line string vllm will receive after PRE_LAUNCH_CMD.
+    # Each token is shell-quoted to survive the bash -c evaluation.
+    VLLM_QUOTED=""
+    for tok in "${VLLM_ARGS[@]}"; do
+        VLLM_QUOTED+=" $(printf '%q' "$tok")"
+    done
+    echo "[auto-gmem] using PRE_LAUNCH_CMD: $PRE_LAUNCH_CMD"
+    exec "${DOCKER_BASE[@]}" "${EXTRA_ARR[@]}" \
+        --entrypoint /bin/bash \
+        "$IMAGE" \
+        -c "$PRE_LAUNCH_CMD && exec$VLLM_QUOTED"
+else
+    exec "${DOCKER_BASE[@]}" "${EXTRA_ARR[@]}" "$IMAGE" "${VLLM_ARGS[@]}"
+fi
