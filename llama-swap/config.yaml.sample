@@ -286,68 +286,93 @@ models:
     cmdStop: "docker stop vllm-qwen3-vl-${PORT}"
 
   # --- Works - is for Pictures, Sound, Text ---
+  # Qwen3-Omni 30B BF16 multimodal — weights ~60 GiB, KV ~6 GiB at 32K.
+  # Static --gpu-memory-utilization 0.40 (~49 GiB) was below weights → KV ValueError.
+  # Switched to launch-vllm-auto.sh: GMEM_MIN=0.60, GMEM_MAX=0.75.
   Qwen3-Omni-30B-A3B-Instruct:
     ttl: 600
+    readyTimeout: 600
     checkEndpoint: "/health"
     cmd: >
-      docker run --rm --name vllm-qwen3-omni-${PORT} 
-      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
-      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
-      -v <LLM_ROOT_PATH>/vllm:/models/vllm 
-      vllm-node:Version_1 
-      vllm serve /models/vllm/Alibaba/Qwen3-Omni-30B-A3B-Instruct
+      env
+      MODEL_PATH=/models/vllm/Alibaba/Qwen3-Omni-30B-A3B-Instruct
+      MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3-Omni-30B-A3B-Instruct
+      CONTAINER_NAME=vllm-qwen3-omni-${PORT}
+      IMAGE=vllm-node:Version_1
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=32768 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=2
+      GMEM_MIN=0.60 GMEM_MAX=0.75 SAFETY_GIB=6
+      /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3-Omni-30B-A3B-Instruct
-      --host ${host} --port ${PORT}
-      --max-model-len 32768
-      --gpu-memory-utilization 0.40
       --trust-remote-code
       --limit-mm-per-prompt '{"image": 2, "audio": 2}'
       --load-format fastsafetensors
       --enable-prefix-caching
-      --tensor-parallel-size ${tensor_parallel} 
+      --tensor-parallel-size ${tensor_parallel}
       --enable-auto-tool-choice
-      --tool-call-parser qwen3_coder 
+      --tool-call-parser hermes
      # USE ONLY THIS PARSER FOR OMNI:
      # REMOVE --reasoning-parser qwen3
     cmdStop: "docker stop vllm-qwen3-omni-${PORT}"
 
 
-  # --- is for Codeing ---
+  # --- is for Coding (Qwen3-Next ~480B-A22B, FP8 Dynamic) ---
+  # Weights ≈ 77.8 GiB. Uses launch-vllm-auto.sh + PRE_LAUNCH_CMD to apply
+  # the AutoRound mod patch before vllm starts. Auto-fits gmem to free VRAM.
   Qwen3-Coder-Next-FP8-Dynamic:
     ttl: 3600
     readyTimeout: 1200
     checkEndpoint: "/health"
     cmd: >
-      docker run --rm --name vllm-qwen3-coder-${PORT}
-      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
-      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
-      -v <LLM_ROOT_PATH>/vllm:/models/vllm
-      -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro
-      --entrypoint /bin/bash
-      vllm-node-tf5:latest
-      -c "cd /mod && bash run.sh && python3 -m vllm.entrypoints.openai.api_server --model /models/vllm/Alibaba/Qwen3-Coder-Next-FP8-Dynamic --served-model-name Qwen3-Coder-Next-FP8-Dynamic --host ${host} --port ${PORT} --gpu-memory-utilization 0.40 --max-model-len 32768 --kv-cache-dtype fp8 --load-format fastsafetensors --attention-backend flashinfer --tensor-parallel-size 1 --enable-auto-tool-choice --tool-call-parser qwen3_coder"
-     # REMOVE --reasoning-parser qwen3
+      env
+      MODEL_PATH=/models/vllm/Alibaba/Qwen3-Coder-Next-FP8-Dynamic
+      MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3-Coder-Next-FP8-Dynamic
+      CONTAINER_NAME=vllm-qwen3-coder-${PORT}
+      IMAGE=vllm-node-tf5:latest
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=32768 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
+      GMEM_MIN=0.80 GMEM_MAX=0.92 SAFETY_GIB=6
+      EXTRA_DOCKER_ARGS='-e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro'
+      PRE_LAUNCH_CMD='cd /mod && bash run.sh'
+      /app/scripts/launch-vllm-auto.sh
+      --served-model-name Qwen3-Coder-Next-FP8-Dynamic
+      --kv-cache-dtype fp8
+      --load-format fastsafetensors
+      --attention-backend flashinfer
+      --enable-prefix-caching
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+     # NOTE: no --reasoning-parser (Coder-Next doesn't expose <think> in standard mode)
     cmdStop: "docker stop vllm-qwen3-coder-${PORT}"
 
   # --- Optimized: 1M context, INT4 AutoRound, spark-arena v2 recipe ---
+  # Same launcher pattern as the FP8-Dynamic block — adaptive gmem + mod patch.
   Qwen3-Coder-Next-int4-AutoRound:
     ttl: 3600
     readyTimeout: 1200
     checkEndpoint: "/health"
     cmd: >
-      docker run --rm --name vllm-qwen3-coder-ar-${PORT}
-      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
-      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
-      -e VLLM_MARLIN_USE_ATOMIC_ADD=1
-      -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-      -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
-      -e SAFETENSORS_FAST_GPU=1
-      -e VLLM_USE_FLASHINFER_MOE_FP8=1
-      -v <LLM_ROOT_PATH>/vllm:/models/vllm
-      -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro
-      --entrypoint /bin/bash
-      vllm-node-tf5:latest
-      -c "cd /mod && bash run.sh && python3 -m vllm.entrypoints.openai.api_server --model /models/vllm/Alibaba/Qwen3-Coder-Next-int4-AutoRound --served-model-name Qwen3-Coder-Next-int4-AutoRound --enable-auto-tool-choice --tool-call-parser qwen3_coder --gpu-memory-utilization 0.40 --host ${host} --port ${PORT} --load-format fastsafetensors --max-model-len 32768 --language-model-only --enable-chunked-prefill --max-num-batched-tokens 49152 --max-num-seqs 384 --kv-cache-dtype fp8 --optimization-level 3 --performance-mode throughput"
+      env
+      MODEL_PATH=/models/vllm/Alibaba/Qwen3-Coder-Next-int4-AutoRound
+      MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3-Coder-Next-int4-AutoRound
+      CONTAINER_NAME=vllm-qwen3-coder-ar-${PORT}
+      IMAGE=vllm-node-tf5:latest
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=32768 MAX_NUM_SEQS=384 KV_DTYPE_BYTES=1
+      GMEM_MIN=0.55 GMEM_MAX=0.85 SAFETY_GIB=6
+      EXTRA_DOCKER_ARGS='-e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -e SAFETENSORS_FAST_GPU=1 -e VLLM_USE_FLASHINFER_MOE_FP8=1 -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro'
+      PRE_LAUNCH_CMD='cd /mod && bash run.sh'
+      /app/scripts/launch-vllm-auto.sh
+      --served-model-name Qwen3-Coder-Next-int4-AutoRound
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --load-format fastsafetensors
+      --language-model-only
+      --enable-chunked-prefill
+      --max-num-batched-tokens 49152
+      --kv-cache-dtype fp8
+      --optimization-level 3
+      --performance-mode throughput
      # REMOVE --reasoning-parser qwen3
     cmdStop: "docker stop vllm-qwen3-coder-ar-${PORT}"
 

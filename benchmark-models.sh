@@ -1377,11 +1377,30 @@ for MODEL in $MODELS; do
             max_depth=$(jq -r '.benchmarks[].context_size' "$local_json" | sort -rn | head -n1)
             deepest_tg=$(jq -r ".benchmarks[] | select(.context_size == $max_depth) | .tg_throughput.mean // empty" "$local_json" | head -n1)
             
-            # Baseline metrics for the summary table
-            SUMMARY_PP[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | if .pp_throughput.std > 0.5 then "\(.pp_throughput.mean + 0.5 | floor) +/-\(.pp_throughput.std + 0.5 | floor)" else "\(.pp_throughput.mean + 0.5 | floor)" end' "$local_json" | head -n1)
-            SUMMARY_TG[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | if .tg_throughput.std > 0.5 then "\((.tg_throughput.mean * 10 + 0.5 | floor) / 10) +/-\((.tg_throughput.std * 10 + 0.5 | floor) / 10)" else "\((.tg_throughput.mean * 10 + 0.5 | floor) / 10)" end' "$local_json" | head -n1)
-            SUMMARY_PEAK[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | .peak_throughput.mean + 0.5 | floor' "$local_json" | head -n1)
-            SUMMARY_TTFT[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | .e2e_ttft.mean + 0.5 | floor' "$local_json" | head -n1)
+            # Baseline metrics for the summary table.
+            # Some servers (vLLM in certain modes) don't return prompt_tokens
+            # for the depth=0 baseline, so pp_throughput is null. Fall back to
+            # the smallest non-null depth so pp doesn't show as 0.
+            SUMMARY_PP[$MODEL]=$(jq -r '
+                [.benchmarks[]
+                  | select(.pp_throughput != null and .pp_throughput.mean != null)
+                  | {ctx: .context_size, pp: .pp_throughput}]
+                | sort_by(.ctx)
+                | (.[0] // empty)
+                | if .pp.std > 0.5
+                  then "\(.pp.mean + 0.5 | floor) +/-\(.pp.std + 0.5 | floor)"
+                  else "\(.pp.mean + 0.5 | floor)"
+                  end' "$local_json" | head -n1)
+            [[ -z "${SUMMARY_PP[$MODEL]}" ]] && SUMMARY_PP[$MODEL]="—"
+
+            SUMMARY_TG[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | select(.tg_throughput != null and .tg_throughput.mean != null) | if .tg_throughput.std > 0.5 then "\((.tg_throughput.mean * 10 + 0.5 | floor) / 10) +/-\((.tg_throughput.std * 10 + 0.5 | floor) / 10)" else "\((.tg_throughput.mean * 10 + 0.5 | floor) / 10)" end' "$local_json" | head -n1)
+            [[ -z "${SUMMARY_TG[$MODEL]}" ]] && SUMMARY_TG[$MODEL]="—"
+
+            SUMMARY_PEAK[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | select(.peak_throughput != null and .peak_throughput.mean != null) | .peak_throughput.mean + 0.5 | floor' "$local_json" | head -n1)
+            [[ -z "${SUMMARY_PEAK[$MODEL]}" ]] && SUMMARY_PEAK[$MODEL]="—"
+
+            SUMMARY_TTFT[$MODEL]=$(jq -r '.benchmarks[] | select(.context_size == 0) | select(.e2e_ttft != null and .e2e_ttft.mean != null) | .e2e_ttft.mean + 0.5 | floor' "$local_json" | head -n1)
+            [[ -z "${SUMMARY_TTFT[$MODEL]}" ]] && SUMMARY_TTFT[$MODEL]="—"
             
             if [[ -n "$baseline_tg" && -n "$deepest_tg" && "$max_depth" -gt 0 ]]; then
                 pct=$(echo "scale=1; (($deepest_tg - $baseline_tg) / $baseline_tg) * 100" | bc)
