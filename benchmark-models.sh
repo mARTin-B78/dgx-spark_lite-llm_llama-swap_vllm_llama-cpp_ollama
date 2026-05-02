@@ -61,6 +61,13 @@ CHECKPOINT_FILE=""
 RESUME=false
 SKIP_MODELS=()
 
+# Quality (tool-eval-bench) — opt-in second pass after llama-benchy, same load
+QUALITY=false
+QUALITY_MODE="short"          # short | full | hardmode
+QUALITY_CATEGORIES=""         # optional letters, e.g. "K A J"
+QUALITY_DIR="$SCRIPT_DIR/test-results/quality"
+TOOLEVAL_CMD=""
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -122,6 +129,30 @@ while [[ $# -gt 0 ]]; do
             RESUME=true
             shift
             ;;
+        --quality)
+            QUALITY=true
+            shift
+            ;;
+        --quality-mode)
+            QUALITY=true
+            QUALITY_MODE="$2"
+            shift 2
+            ;;
+        --quality-mode=*)
+            QUALITY=true
+            QUALITY_MODE="${1#*=}"
+            shift
+            ;;
+        --quality-categories)
+            QUALITY=true
+            QUALITY_CATEGORIES="$2"
+            shift 2
+            ;;
+        --quality-categories=*)
+            QUALITY=true
+            QUALITY_CATEGORIES="${1#*=}"
+            shift
+            ;;
         --help|-h)
             cat <<'HELPEOF'
 Usage: benchmark-models.sh [OPTIONS] [FILTER...]
@@ -154,6 +185,15 @@ Profiles (simulating real-world document workloads):
 Other options:
   --runs N     Override number of runs (default: 3)
   --resume     Resume from the last interrupted session (skip already-completed models)
+  --quality    After llama-benchy, also run tool-eval-bench (tool-call quality)
+               on the same loaded model. Avoids the cost of a second load.
+  --quality-mode MODE
+               short    (default) — 15 core scenarios, ~2-5 min/model
+               full     — 69 scenarios, ~15-30 min/model
+               hardmode — full + 5 adversarial scenarios
+  --quality-categories "K A J"
+               Run only specific tool-eval-bench category letters (A-P).
+               Implies --quality.
   --help       Show this help
 
 Filters:
@@ -488,6 +528,95 @@ PYEOF
 
     log "  ${DIM}JSON data : $json_file${NC}"
     log "  ${DIM}Forum table: $md_file${NC}"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# tool-eval-bench (quality) helpers
+# ---------------------------------------------------------------------------
+
+# Run tool-eval-bench against the currently-loaded model. Captures the score
+# from the markdown report it writes into $QUALITY_DIR. Returns the score as a
+# global (QUALITY_SCORE / QUALITY_RATING / QUALITY_REPORT) for the summary.
+QUALITY_SCORE=""
+QUALITY_RATING=""
+QUALITY_REPORT=""
+run_quality() {
+    local model="$1"
+    QUALITY_SCORE=""; QUALITY_RATING=""; QUALITY_REPORT=""
+    [[ -z "$TOOLEVAL_CMD" ]] && return 0
+
+    log ""
+    log "  ${CYAN}Running tool-eval-bench (quality)...${NC}"
+
+    local flags=""
+    flags+=" --base-url $LLAMA_SWAP_URL"
+    flags+=" --model $model"
+    flags+=" --backend vllm"
+    flags+=" --no-warmup"
+    flags+=" --no-live"
+    flags+=" --seed 42"
+    flags+=" --output-dir $QUALITY_DIR"
+
+    case "$QUALITY_MODE" in
+        short)    flags+=" --short" ;;
+        full)     ;;  # default 69 scenarios
+        hardmode) flags+=" --hardmode" ;;
+        *)        log "  ${YELLOW}Unknown --quality-mode '$QUALITY_MODE', defaulting to short${NC}"
+                  flags+=" --short" ;;
+    esac
+    [[ -n "$QUALITY_CATEGORIES" ]] && flags+=" --categories $QUALITY_CATEGORIES"
+
+    # Capture stdout + stderr so we can extract the score line.
+    local out_file="/tmp/tooleval_${TIMESTAMP}_$$.log"
+    local exit_code=0
+    eval "$TOOLEVAL_CMD$flags" >"$out_file" 2>&1 || exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        log "  ${RED}tool-eval-bench failed (exit $exit_code):${NC}"
+        tail -20 "$out_file" | tee -a "$REPORT_FILE"
+        rm -f "$out_file"
+        return 1
+    fi
+
+    # tool-eval-bench writes its report to $QUALITY_DIR/<run_id>/report.md
+    # and prints a final summary to stdout. Pull score from stdout first
+    # ("Final Score: 73.4 / 100" or "Score: 73 ★★★"), fall back to newest
+    # report file in $QUALITY_DIR.
+    QUALITY_SCORE=$(grep -oE 'Score:?[[:space:]]*[0-9]+(\.[0-9]+)?' "$out_file" \
+        | head -n1 | grep -oE '[0-9]+(\.[0-9]+)?' || true)
+    QUALITY_RATING=$(grep -oE '★+[^[:space:]]*[[:space:]]*[A-Za-z]+' "$out_file" \
+        | head -n1 || true)
+
+    if [[ -z "$QUALITY_SCORE" ]]; then
+        # Fall back to newest report.md in QUALITY_DIR
+        local newest_report
+        newest_report=$(find "$QUALITY_DIR" -name 'report.md' -newer "$out_file" 2>/dev/null \
+            | head -n1)
+        [[ -z "$newest_report" ]] && newest_report=$(ls -t "$QUALITY_DIR"/*/report.md 2>/dev/null | head -n1)
+        if [[ -n "$newest_report" && -f "$newest_report" ]]; then
+            QUALITY_REPORT="$newest_report"
+            QUALITY_SCORE=$(grep -oE 'Score[^0-9]*[0-9]+(\.[0-9]+)?' "$newest_report" \
+                | head -n1 | grep -oE '[0-9]+(\.[0-9]+)?' || true)
+            QUALITY_RATING=$(grep -oE '★+[^[:space:]]*[[:space:]]*[A-Za-z]+' "$newest_report" \
+                | head -n1 || true)
+        fi
+    else
+        QUALITY_REPORT=$(ls -t "$QUALITY_DIR"/*/report.md 2>/dev/null | head -n1)
+    fi
+
+    # Echo the tool-eval-bench summary block (last 25 lines of stdout) to the
+    # main report so it ends up in the human-readable .txt output.
+    log ""
+    tail -25 "$out_file" | tee -a "$REPORT_FILE" >/dev/null
+    rm -f "$out_file"
+
+    if [[ -n "$QUALITY_SCORE" ]]; then
+        log "  ${CYAN}Quality score:${NC} ${BOLD}${QUALITY_SCORE}/100${NC} ${QUALITY_RATING}"
+        [[ -n "$QUALITY_REPORT" ]] && log "  ${DIM}Quality report: $QUALITY_REPORT${NC}"
+    else
+        log "  ${YELLOW}Quality score could not be parsed from tool-eval-bench output${NC}"
+    fi
     return 0
 }
 
@@ -1142,6 +1271,24 @@ else
 fi
 log "  ${DIM}Using: $BENCHY_CMD${NC}"
 
+# Detect tool-eval-bench when --quality is on. Uvx preferred; fall back to PATH.
+if [[ "$QUALITY" == true ]]; then
+    if uvx tool-eval-bench --help > /dev/null 2>&1; then
+        TOOLEVAL_CMD="uvx tool-eval-bench"
+    elif command -v tool-eval-bench > /dev/null 2>&1; then
+        TOOLEVAL_CMD="tool-eval-bench"
+    else
+        log "${YELLOW}Warning: --quality requested but tool-eval-bench not found.${NC}"
+        log "  Install: ${BOLD}uv tool install git+https://github.com/SeraphimSerapis/tool-eval-bench.git${NC}"
+        log "  Quality runs will be skipped."
+        QUALITY=false
+    fi
+    if [[ "$QUALITY" == true ]]; then
+        mkdir -p "$QUALITY_DIR"
+        log "  ${DIM}Quality: $TOOLEVAL_CMD (mode=$QUALITY_MODE${QUALITY_CATEGORIES:+, categories=$QUALITY_CATEGORIES})${NC}"
+    fi
+fi
+
 # Fetch model list
 MODELS=$(curl -sf "$LLAMA_SWAP_URL/v1/models" | jq -r '.data[].id' | sort)
 MODEL_COUNT=$(echo "$MODELS" | wc -l)
@@ -1170,7 +1317,7 @@ IDX=0
 TOTAL_START=$(date +%s.%N)
 
 # Collect results for final summary
-declare -A SUMMARY_PP SUMMARY_TG SUMMARY_PEAK SUMMARY_TTFT SUMMARY_STATUS SUMMARY_DEGRADATION
+declare -A SUMMARY_PP SUMMARY_TG SUMMARY_PEAK SUMMARY_TTFT SUMMARY_STATUS SUMMARY_DEGRADATION SUMMARY_QUALITY
 
 for MODEL in $MODELS; do
     IDX=$((IDX + 1))
@@ -1241,6 +1388,16 @@ for MODEL in $MODELS; do
                 SUMMARY_DEGRADATION[$MODEL]="${pct}% @$((max_depth/1024))k"
             fi
         fi
+
+        # Quality pass (tool-eval-bench) on the same loaded model
+        if [[ "$QUALITY" == true ]]; then
+            run_quality "$MODEL" || true
+            if [[ -n "$QUALITY_SCORE" ]]; then
+                SUMMARY_QUALITY[$MODEL]="${QUALITY_SCORE}"
+            else
+                SUMMARY_QUALITY[$MODEL]="?"
+            fi
+        fi
     else
         FAIL=$((FAIL + 1))
         SUMMARY_STATUS[$MODEL]="FAIL"
@@ -1271,9 +1428,16 @@ log "  Total benchmark time: ${TOTAL_MIN} min"
 log "  Checkpoint : $CHECKPOINT_FILE"
 [[ $FAIL -gt 0 ]] && log "  ${YELLOW}Tip: if this was interrupted, resume with: ./benchmark-models.sh --resume${NC}"
 log ""
-log "  ${BOLD}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s' 'Model' 'Read (pp)' 'Write (tg)' 'Peak' 'TTFT' 'Deep ctx')${NC}"
-log "  ${DIM}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s' '' 'tok/s' 'tok/s' 'tok/s' 'ms' 'degradation')${NC}"
-log "  $(printf '%.0s-' {1..106})"
+# Wider table when quality column is shown
+if [[ "$QUALITY" == true ]]; then
+    log "  ${BOLD}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s  %9s' 'Model' 'Read (pp)' 'Write (tg)' 'Peak' 'TTFT' 'Deep ctx' 'Quality')${NC}"
+    log "  ${DIM}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s  %9s' '' 'tok/s' 'tok/s' 'tok/s' 'ms' 'degradation' '/100')${NC}"
+    log "  $(printf '%.0s-' {1..117})"
+else
+    log "  ${BOLD}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s' 'Model' 'Read (pp)' 'Write (tg)' 'Peak' 'TTFT' 'Deep ctx')${NC}"
+    log "  ${DIM}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s' '' 'tok/s' 'tok/s' 'tok/s' 'ms' 'degradation')${NC}"
+    log "  $(printf '%.0s-' {1..106})"
+fi
 
 for MODEL in $MODELS; do
     local_name="$MODEL"
@@ -1285,15 +1449,28 @@ for MODEL in $MODELS; do
     peak="${SUMMARY_PEAK[$MODEL]:-—}"
     ttft="${SUMMARY_TTFT[$MODEL]:-—}"
     degrad="${SUMMARY_DEGRADATION[$MODEL]:-—}"
+    quality="${SUMMARY_QUALITY[$MODEL]:-—}"
 
     if [[ "$status" == "OK" ]]; then
-        printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "$pp" "$tg" "$peak" "$ttft" "$degrad"
+        if [[ "$QUALITY" == true ]]; then
+            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s  %9s" "$local_name" "$pp" "$tg" "$peak" "$ttft" "$degrad" "$quality"
+        else
+            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "$pp" "$tg" "$peak" "$ttft" "$degrad"
+        fi
         log "${GREEN}${line}${NC}"
     elif [[ "$status" == "INCOHERENT" ]]; then
-        printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "INCOHERENT" "—" "—" "—" "—"
+        if [[ "$QUALITY" == true ]]; then
+            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s  %9s" "$local_name" "INCOHERENT" "—" "—" "—" "—" "—"
+        else
+            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "INCOHERENT" "—" "—" "—" "—"
+        fi
         log "${YELLOW}${line}${NC}"
     else
-        printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "FAIL" "—" "—" "—" "—"
+        if [[ "$QUALITY" == true ]]; then
+            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s  %9s" "$local_name" "FAIL" "—" "—" "—" "—" "—"
+        else
+            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "FAIL" "—" "—" "—" "—"
+        fi
         log "${RED}${line}${NC}"
     fi
 done
@@ -1316,6 +1493,7 @@ log "  Results saved to:"
 log "    Report     : $REPORT_FILE"
 log "    JSON data  : $RESULTS_DIR/*_${TIMESTAMP}.json"
 log "    Forum tables: $RESULTS_DIR/*_${TIMESTAMP}.md"
+[[ "$QUALITY" == true ]] && log "    Quality reports: $QUALITY_DIR/<run_id>/report.md"
 log ""
 log "  ${DIM}Tip: To share on NVIDIA forums, copy the llama-benchy tables${NC}"
 log "  ${DIM}from the .md files — they use the standard format everyone knows.${NC}"

@@ -704,24 +704,42 @@ docker logs -f llama-swap
 
 ## Step 9 — Benchmarking
 
-> **Credit: [@eugr](https://github.com/eugr) — [llama-benchy](https://github.com/eugr/llama-benchy)**
+> **Credits**
+> - **[@eugr](https://github.com/eugr) — [llama-benchy](https://github.com/eugr/llama-benchy)**: standardized throughput benchmark (pp/tg/TTFT) shared across the DGX Spark community. The output table is formatted for direct copy-paste into forum posts.
+> - **[@SeraphimSerapis](https://github.com/SeraphimSerapis) — [tool-eval-bench](https://github.com/SeraphimSerapis/tool-eval-bench)**: 69-scenario tool-calling quality benchmark (tool selection, parameter precision, multi-step chains, safety/refusal, structured output). Optional, opt-in via `--quality`. See the [forum announcement](https://forums.developer.nvidia.com/t/introducing-tool-eval-bench-cli/366903).
 >
-> llama-benchy is a standardized LLM benchmark tool that measures prompt-processing (pp) and token-generation (tg) throughput in a reproducible way specifically designed for comparing results across the DGX Spark community. The benchmark script in this repo is a wrapper around llama-benchy. Thank you @eugr for creating and maintaining it — the consistent output format makes it possible to compare results across different model configs and post meaningful numbers to the forums.
+> `benchmark-models.sh` wraps both. When `--quality` is on, llama-benchy and tool-eval-bench run back-to-back against the *same* loaded model so the costly load step happens only once per model.
 
-Install llama-benchy first:
+### Speed only (default)
 
 ```bash
 pip install llama-benchy
 # or: uvx llama-benchy  (no install needed with uv)
+
+bash benchmark-models.sh                       # default = "Medium Log" profile
+bash benchmark-models.sh --quick Qwen3.6       # smoke test, single model
+bash benchmark-models.sh --stress              # adds depth 32768
+bash benchmark-models.sh --extreme             # adds depth 65535
+bash benchmark-models.sh --arena               # spark-arena leaderboard profile
 ```
 
-Then run the full benchmark across all configured models:
+### Speed + tool-calling quality
+
+Per model the loop becomes: **load → coherence check → llama-benchy (pp/tg/depth sweep) → tool-eval-bench (tool-call scenarios) → unload**. The expensive load happens once.
 
 ```bash
-bash benchmark-models.sh --endpoint http://localhost:28080
+uv tool install git+https://github.com/SeraphimSerapis/tool-eval-bench.git
+
+bash benchmark-models.sh --quality                                  # 15-scenario short pass
+bash benchmark-models.sh --quality --quality-mode full              # full 69 scenarios
+bash benchmark-models.sh --quality --quality-mode hardmode          # full + 5 adversarial
+bash benchmark-models.sh --quality --quality-categories "K A J"     # selected categories only
+bash benchmark-models.sh --quick --quality Qwen3.6-35B-A3B-FP8      # combine with any speed profile
 ```
 
-The script tests each model sequentially, runs a coherence check to detect repetition loops, and writes a results summary to `test-results/`. The llama-benchy output table is formatted for direct copy-paste into forum posts.
+When `--quality` is enabled the summary table grows a `Quality /100` column and per-model markdown reports land in `test-results/quality/<run_id>/report.md`. The script tests each model sequentially, runs a coherence check to detect repetition loops, and writes a combined results summary to `test-results/benchmarks/`.
+
+> **Note on `groups:`**: if you previously enabled the `groups:` block in `llama-swap/config.yaml` and see the wrong model loading mid-benchmark, comment out the entire `groups:` block. Group eviction logic can swap to a sibling model when one fails to load, which corrupts the run (the wrong model gets benchmarked). See the sample config for the disabled-by-default layout.
 
 ---
 
@@ -761,6 +779,7 @@ With `swap: true` on all groups, the active model is always evicted before the n
 This stack stands on the shoulders of several people's work:
 
 - **[@eugr](https://github.com/eugr)** — [spark-vllm-docker](https://github.com/eugr/spark-vllm-docker): pre-built vLLM + FlashInfer wheels for GB10, and [llama-benchy](https://github.com/eugr/llama-benchy): the benchmarking tool. Both projects are essential to making this practical. Thank you.
+- **[@SeraphimSerapis](https://github.com/SeraphimSerapis)** — [tool-eval-bench](https://github.com/SeraphimSerapis/tool-eval-bench): tool-calling quality benchmark with 69 scenarios across selection, parameter precision, multi-step chains, safety, and structured output. Wired into `benchmark-models.sh` via `--quality`. Thank you.
 - **[@christopherowen](https://github.com/christopherowen)** — [spark-vllm-mxfp4-docker](https://github.com/christopherowen/spark-vllm-mxfp4-docker) and the custom vLLM/FlashInfer/CUTLASS forks enabling native MXFP4 on GB10. This is what unlocks GPT-OSS-120B at full speed. Thank you.
 - **[mostlygeek/llama-swap](https://github.com/mostlygeek/llama-swap)** — the VRAM orchestrator at the center of this stack.
 - **[BerriAI/litellm](https://github.com/BerriAI/litellm)** — the unified API gateway.
