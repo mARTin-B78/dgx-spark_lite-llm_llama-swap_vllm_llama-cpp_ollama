@@ -629,14 +629,27 @@ docker logs -f llama-swap
 
 ## Step 12 — Benchmark
 
-> **Credit: [@eugr](https://github.com/eugr) — [llama-benchy](https://github.com/eugr/llama-benchy)**
->
-> Standardized LLM benchmark tool built for the Spark community. Output format is designed for direct copy-paste into forum posts for cross-system comparison. Thank you @eugr.
+> **Credits**
+> - **[@eugr](https://github.com/eugr) — [llama-benchy](https://github.com/eugr/llama-benchy)** — standardized throughput benchmark (pp/tg/TTFT). Output format is designed for direct copy-paste into forum posts for cross-system comparison.
+> - **[@SeraphimSerapis](https://github.com/SeraphimSerapis) — [tool-eval-bench](https://github.com/SeraphimSerapis/tool-eval-bench)** — 69-scenario tool-calling quality benchmark. Optional via `--quality`. See the [forum announcement](https://forums.developer.nvidia.com/t/introducing-tool-eval-bench-cli/366903).
+
+Speed only (default):
 
 ```bash
-pip install llama-benchy
-bash benchmark-models.sh --endpoint http://localhost:28080
+pip install llama-benchy           # or: uvx llama-benchy
+bash benchmark-models.sh           # default = "Medium Log" profile
 ```
+
+Speed + tool-calling quality, single load per model (load → llama-benchy → tool-eval-bench → unload):
+
+```bash
+uv tool install git+https://github.com/SeraphimSerapis/tool-eval-bench.git
+bash benchmark-models.sh --quality                          # 15-scenario short pass (~2-5 min/model)
+bash benchmark-models.sh --quality --quality-mode full      # 69 scenarios (~15-30 min/model)
+bash benchmark-models.sh --quality --quality-categories "K A J"  # only chosen categories
+```
+
+The summary table grows a `Quality /100` column when `--quality` is on. Per-model markdown reports land in `test-results/quality/<run_id>/report.md`.
 
 ---
 
@@ -668,6 +681,7 @@ Model containers must use `--network container:llama-swap` so they share llama-s
 ## Acknowledgements
 
 - **[@eugr](https://github.com/eugr)** — [spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) (pre-built GB10 vLLM wheels, nightly CI) and [llama-benchy](https://github.com/eugr/llama-benchy) (benchmarking). Both are essential to this stack. Thank you.
+- **[@SeraphimSerapis](https://github.com/SeraphimSerapis)** — [tool-eval-bench](https://github.com/SeraphimSerapis/tool-eval-bench): 69-scenario tool-calling quality benchmark used by `benchmark-models.sh --quality`.
 - **[@christopherowen](https://github.com/christopherowen)** — [spark-vllm-mxfp4-docker](https://github.com/christopherowen/spark-vllm-mxfp4-docker) (CUTLASS MXFP4 kernels for GB10 / GPT-OSS-120B). Thank you.
 - **[mostlygeek/llama-swap](https://github.com/mostlygeek/llama-swap)** — the VRAM orchestrator.
 - **[BerriAI/litellm](https://github.com/BerriAI/litellm)** — the API gateway.

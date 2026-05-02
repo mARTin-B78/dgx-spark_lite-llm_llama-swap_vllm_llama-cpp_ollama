@@ -27,20 +27,18 @@ macros:
 #
 # ┌──────────────────────────────────────────────────────────────────────┐
 # │  Intended usage modes (pick one at a time):                          │
-# │  4× S   : up to 4 small models simultaneously                       │
-# │  2S + 1M: 2 small + 1 medium (gpu_mem of each must sum ≤ ~0.84)    │
-# │  2× M   : up to 2 medium models simultaneously                      │
-# │  1× L   : one 120B+ model solo — evicts S and M automatically       │
+# │  2× S    : 2 small models simultaneously                             │
+# │  1S + 1M : 1 small + 1 medium simultaneously                         │
+# │  1× L    : one 120B+ model solo — evicts S and M automatically       │
 # └──────────────────────────────────────────────────────────────────────┘
 #
 # ⚠️  VRAM NOTE: Each vLLM instance pre-allocates
 #      gpu_memory_utilization × 128GB of CUDA memory.
-#      For concurrent use to fit in 108GB, reduce --gpu-memory-utilization
-#      per model before enabling multi-model loading.
-#      Recommended concurrent values:
-#        S tier: 0.12–0.22  (15–28 GB each, 4 fit in ~93 GB)
-#        M tier: 0.40       (51 GB each, 2 fit in ~102 GB)
-#        L tier: keep 0.70–0.75 (solo only)
+#      Sum of all concurrent gpu_mem values must be ≤ ~0.84 to fit in 108GB.
+#      Active values:
+#        S tier: 0.40 (~51 GB each, 2 fit in ~102 GB)
+#        M tier: 0.40 (~51 GB each, 1 M + 1 S fit in ~102 GB)
+#        L tier: 0.70–0.75 (solo only — auto-evicts S and M)
 groups:
 
   # S — Small / fast models: 4B–30B quantized
@@ -212,7 +210,7 @@ models:
       vllm serve /models/vllm/Alibaba/Qwen3.5-35B-A3B-FP8
       --served-model-name Qwen3.5-35B-A3B-FP8
       --host ${host} --port ${PORT}
-      --gpu-memory-utilization 0.7
+      --gpu-memory-utilization 0.40
       --max-model-len 131072
       --max-num-seqs 16
       --max-num-batched-tokens 4096
@@ -276,7 +274,7 @@ models:
       --served-model-name Qwen3-VL-30B-A3B-Instruct-FP8
       --host ${host} --port ${PORT}
       --max-model-len 32768
-      --gpu-memory-utilization 0.60
+      --gpu-memory-utilization 0.40
       --trust-remote-code
       --limit-mm-per-prompt '{"image": 2}'
       --kv-cache-dtype fp8
@@ -301,7 +299,7 @@ models:
       --served-model-name Qwen3-Omni-30B-A3B-Instruct
       --host ${host} --port ${PORT}
       --max-model-len 32768
-      --gpu-memory-utilization 0.75
+      --gpu-memory-utilization 0.40
       --trust-remote-code
       --limit-mm-per-prompt '{"image": 2, "audio": 2}'
       --load-format fastsafetensors
@@ -327,7 +325,7 @@ models:
       -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro
       --entrypoint /bin/bash
       vllm-node-tf5:latest
-      -c "cd /mod && bash run.sh && python3 -m vllm.entrypoints.openai.api_server --model /models/vllm/Alibaba/Qwen3-Coder-Next-FP8-Dynamic --served-model-name Qwen3-Coder-Next-FP8-Dynamic --host ${host} --port ${PORT} --gpu-memory-utilization 0.75 --max-model-len 32768 --kv-cache-dtype fp8 --load-format fastsafetensors --attention-backend flashinfer --tensor-parallel-size 1 --enable-auto-tool-choice --tool-call-parser qwen3_coder"
+      -c "cd /mod && bash run.sh && python3 -m vllm.entrypoints.openai.api_server --model /models/vllm/Alibaba/Qwen3-Coder-Next-FP8-Dynamic --served-model-name Qwen3-Coder-Next-FP8-Dynamic --host ${host} --port ${PORT} --gpu-memory-utilization 0.40 --max-model-len 32768 --kv-cache-dtype fp8 --load-format fastsafetensors --attention-backend flashinfer --tensor-parallel-size 1 --enable-auto-tool-choice --tool-call-parser qwen3_coder"
      # REMOVE --reasoning-parser qwen3
     cmdStop: "docker stop vllm-qwen3-coder-${PORT}"
 
@@ -349,7 +347,7 @@ models:
       -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro
       --entrypoint /bin/bash
       vllm-node-tf5:latest
-      -c "cd /mod && bash run.sh && python3 -m vllm.entrypoints.openai.api_server --model /models/vllm/Alibaba/Qwen3-Coder-Next-int4-AutoRound --served-model-name Qwen3-Coder-Next-int4-AutoRound --enable-auto-tool-choice --tool-call-parser qwen3_coder --gpu-memory-utilization 0.6 --host ${host} --port ${PORT} --load-format fastsafetensors --max-model-len 32768 --language-model-only --enable-chunked-prefill --max-num-batched-tokens 49152 --max-num-seqs 384 --kv-cache-dtype fp8 --optimization-level 3 --performance-mode throughput"
+      -c "cd /mod && bash run.sh && python3 -m vllm.entrypoints.openai.api_server --model /models/vllm/Alibaba/Qwen3-Coder-Next-int4-AutoRound --served-model-name Qwen3-Coder-Next-int4-AutoRound --enable-auto-tool-choice --tool-call-parser qwen3_coder --gpu-memory-utilization 0.40 --host ${host} --port ${PORT} --load-format fastsafetensors --max-model-len 32768 --language-model-only --enable-chunked-prefill --max-num-batched-tokens 49152 --max-num-seqs 384 --kv-cache-dtype fp8 --optimization-level 3 --performance-mode throughput"
      # REMOVE --reasoning-parser qwen3
     cmdStop: "docker stop vllm-qwen3-coder-ar-${PORT}"
 
@@ -367,7 +365,7 @@ models:
       vllm serve /models/vllm/Nvidia/Nemotron-3-Nano-4B-FP8
       --served-model-name Nemotron-3-Nano-4B-FP8
       --host ${host} --port ${PORT}
-      --gpu-memory-utilization 0.5
+      --gpu-memory-utilization 0.40
       --max-model-len 8192
       --kv-cache-dtype fp8
       --enforce-eager
@@ -394,7 +392,7 @@ models:
       vllm serve /models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
       --served-model-name Nemotron-3-Nano-30B-A3B-NVFP4
       --host ${host} --port ${PORT}
-      --gpu-memory-utilization 0.65
+      --gpu-memory-utilization 0.40
       --max-model-len 131072
       --kv-cache-dtype fp8
       --enforce-eager
@@ -481,7 +479,7 @@ models:
       vllm serve /models/vllm/Mistral/Mistral-Small-24B-Instruct-2501
       --served-model-name Mistral-Small-24B-Instruct-2501
       --host ${host} --port ${PORT}
-      --gpu-memory-utilization ${gpu_mem}
+      --gpu-memory-utilization 0.40
       --max-model-len 32768
       --trust-remote-code
       --tensor-parallel-size ${tensor_parallel} 
