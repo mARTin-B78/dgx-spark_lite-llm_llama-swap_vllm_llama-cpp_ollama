@@ -429,6 +429,44 @@ models:
       --reasoning-parser nano_v3
     cmdStop: "docker stop vllm-nemotron-${PORT}"
 
+# --- NVIDIA Nemotron-3 Nano-Omni (30B MoE multimodal: text+image+audio+video, NVFP4) ---
+# Image vllm/vllm-openai has `vllm serve` as ENTRYPOINT, so VLLM_SERVE_PREFIX=""
+# is set to skip prepending it. Adaptive gmem (GMEM_MAX=0.85) handles the
+# CUDA-memory-pressure failure mode seen mid-benchmark with static 0.80.
+  Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4:
+    ttl: 3600
+    readyTimeout: 1200
+    checkEndpoint: "/health"
+    cmd: >
+      env
+      MODEL_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+      MODEL_HOST_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+      CONTAINER_NAME=vllm-nano-omni-nvfp4-${PORT}
+      IMAGE=vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=131072 MAX_NUM_SEQS=8 KV_DTYPE_BYTES=1
+      GMEM_MIN=0.65 GMEM_MAX=0.85 SAFETY_GIB=8
+      VLLM_SERVE_PREFIX=""
+      EXTRA_DOCKER_ARGS='-e VLLM_NVFP4_GEMM_BACKEND=marlin -e VLLM_USE_FLASHINFER_MOE_FP4=0 -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -e CUDA_MANAGED_FORCE_DEVICE_ALLOC=1 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
+      /app/scripts/launch-vllm-auto.sh
+      --served-model-name Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 nemotron-3-nano-omni-nvfp4
+      --chat-template /models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4/chat_template.jinja
+      --max-num-batched-tokens 32768
+      --quantization fp4
+      --moe-backend marlin
+      --kv-cache-dtype fp8
+      --mamba-ssm-cache-dtype float32
+      --enable-prefix-caching
+      --reasoning-parser nemotron_v3
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --video-pruning-rate 0.5
+      --limit-mm-per-prompt '{"video": 1, "image": 1, "audio": 1}'
+      --media-io-kwargs '{"video": {"fps": 2, "num_frames": 256}}'
+      --allowed-local-media-path /
+      --trust-remote-code
+    cmdStop: "docker stop vllm-nano-omni-nvfp4-${PORT}"
+
 # --- NVIDIA Nemotron-3 Super (120B MoE - Blackwell Optimized NVFP4) ---
   Nemotron-3-Super-120B-A12B-NVFP4:
     ttl: 3600
