@@ -33,6 +33,10 @@
 #                      `vllm serve`. When set, the launcher uses
 #                      `--entrypoint /bin/bash -c "PRE_LAUNCH_CMD && exec vllm serve …"`.
 #                      Use for image patches, mod scripts, or env setup.
+#   VLLM_SERVE_PREFIX  command tokens to invoke vllm-serve. Default "vllm serve".
+#                      Set to "" (empty) for images whose ENTRYPOINT already is
+#                      `vllm serve` (e.g. vllm/vllm-openai), so the model path
+#                      and flags are passed directly as the entrypoint args.
 #
 # Remaining args ($@) are passed verbatim after `vllm serve $MODEL_PATH ...`.
 
@@ -181,9 +185,14 @@ EXTRA_DOCKER_ARGS="${EXTRA_DOCKER_ARGS:-}"
 EXTRA_ARR=()
 [ -n "$EXTRA_DOCKER_ARGS" ] && read -r -a EXTRA_ARR <<< "$EXTRA_DOCKER_ARGS"
 
-# Common vllm args.
+# Common vllm args. VLLM_SERVE_PREFIX defaults to "vllm serve" but can be
+# unset (empty) for images whose ENTRYPOINT is already vllm serve.
+VLLM_SERVE_PREFIX="${VLLM_SERVE_PREFIX-vllm serve}"
+VLLM_PREFIX_ARR=()
+[ -n "$VLLM_SERVE_PREFIX" ] && read -r -a VLLM_PREFIX_ARR <<< "$VLLM_SERVE_PREFIX"
 VLLM_ARGS=(
-    vllm serve "$MODEL_PATH"
+    "${VLLM_PREFIX_ARR[@]}"
+    "$MODEL_PATH"
     --host "$HOST" --port "$PORT"
     --gpu-memory-utilization "$GMEM"
     --max-model-len "$MAX_MODEL_LEN"
