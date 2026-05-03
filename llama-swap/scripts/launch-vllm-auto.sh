@@ -162,9 +162,11 @@ NEED_GIB=$(awk -v w="$WEIGHTS_GIB" -v k="$KV_GIB" -v s="$SAFETY_GIB" \
 # total budget AND the free-memory window the gmem calculation sees.
 MEM_TOTAL_KB=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
 MEM_AVAIL_KB=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
+MEM_FREE_KB=$(awk '/^MemFree:/{print $2}' /proc/meminfo)
 
 MEM_TOTAL_GIB_RAW=$(awk -v t="$MEM_TOTAL_KB" 'BEGIN{printf "%.2f", t/1048576}')
 MEM_AVAIL_GIB_RAW=$(awk -v a="$MEM_AVAIL_KB" 'BEGIN{printf "%.2f", a/1048576}')
+MEM_FREE_GIB_RAW=$(awk -v f="$MEM_FREE_KB" 'BEGIN{printf "%.2f", f/1048576}')
 
 # Reserved headroom = MemTotal - ceiling (clamped to 0).
 HEADROOM_GIB=$(awk -v t="$MEM_TOTAL_GIB_RAW" -v c="$SYSTEM_RAM_CEILING_GIB" \
@@ -177,8 +179,16 @@ MEM_TOTAL_GIB_CAPPED=$(awk -v t="$MEM_TOTAL_GIB_RAW" -v c="$SYSTEM_RAM_CEILING_G
 TOTAL_GIB=$(awk -v t="$MEM_TOTAL_GIB_CAPPED" -v o="$CUDA_OVERHEAD_GIB" \
     'BEGIN{printf "%.2f", t - o}')
 
-# Effective free = MemAvailable minus the reserved headroom (already-free
-# memory above the ceiling can't be safely allocated), then minus CUDA overhead.
+# Use MemAvailable for the free estimate — the kernel reclaims page cache
+# as vLLM allocates its CUDA pool, so the "could be freed" figure is what
+# the model actually has access to. MemFree alone is too pessimistic after
+# a recent model swap (page cache holds the prior weights).
+#
+# However, vLLM's startup check uses cudaMemGetInfo which sees a snapshot
+# CLOSER to MemFree before reclaim. To bridge that race, GMEM_FREE_BUFFER_GIB
+# (default 5) is subtracted from u_cap so the launcher never asks for more
+# than (MemAvailable - buffer) GiB. Tested fix for the ~1 GiB cudaMemGetInfo
+# vs MemAvailable discrepancy that crashed Nemotron-Super-120B.
 FREE_GIB=$(awk -v a="$MEM_AVAIL_GIB_RAW" -v h="$HEADROOM_GIB" -v o="$CUDA_OVERHEAD_GIB" \
     'BEGIN{f=a - h - o; if(f<0)f=0; printf "%.2f", f}')
 
@@ -188,9 +198,13 @@ FREE_GIB=$(awk -v a="$MEM_AVAIL_GIB_RAW" -v h="$HEADROOM_GIB" -v o="$CUDA_OVERHE
 # on real concurrent batch and observed free memory. So when our estimate
 # exceeds free, fall back to GMEM_MAX (clamped to free) and let vLLM's startup
 # check decide. If even GMEM_MIN doesn't fit, that's a true OOM — exit then.
+GMEM_FREE_BUFFER_GIB="${GMEM_FREE_BUFFER_GIB:-5}"
 GMEM=$(awk -v need="$NEED_GIB" -v free="$FREE_GIB" -v total="$TOTAL_GIB" \
-        -v gmin="$GMEM_MIN" -v gmax="$GMEM_MAX" 'BEGIN{
-    u_cap = (free - 1) / total;
+        -v gmin="$GMEM_MIN" -v gmax="$GMEM_MAX" -v buf="$GMEM_FREE_BUFFER_GIB" 'BEGIN{
+    # Buffer between launcher cap and CUDA-visible free, since MemAvailable
+    # and cudaMemGetInfo can disagree by ~1 GiB right at vLLM startup
+    # (kernel reclaims page cache during cudaMalloc, not before the check).
+    u_cap = (free - buf) / total;
     if (u_cap < 0) u_cap = 0;
     if (u_cap < gmin) {
         printf "ERR cap=%.2f gmin=%.2f free=%.2f", u_cap, gmin, free;
@@ -221,7 +235,7 @@ GMEM_MODE="${GMEM##*|}"
 
 echo "[auto-gmem] cfg: layers=$N_LAYERS kv_heads=$N_KV head_dim=$HEAD_DIM ctx=$MAX_MODEL_LEN batch=$MAX_NUM_SEQS kvb=$KV_DTYPE_BYTES kv_batch_used=$KV_BATCH"
 echo "[auto-gmem] weights=${WEIGHTS_GIB}GiB kv=${KV_GIB}GiB safety=${SAFETY_GIB}GiB → need=${NEED_GIB}GiB"
-echo "[auto-gmem] system: MemTotal=${MEM_TOTAL_GIB_RAW}GiB MemAvail=${MEM_AVAIL_GIB_RAW}GiB ceiling=${SYSTEM_RAM_CEILING_GIB}GiB headroom_reserved=${HEADROOM_GIB}GiB"
+echo "[auto-gmem] system: MemTotal=${MEM_TOTAL_GIB_RAW}GiB MemFree=${MEM_FREE_GIB_RAW}GiB MemAvail=${MEM_AVAIL_GIB_RAW}GiB ceiling=${SYSTEM_RAM_CEILING_GIB}GiB headroom_reserved=${HEADROOM_GIB}GiB"
 echo "[auto-gmem] free=${FREE_GIB}GiB total=${TOTAL_GIB}GiB (CUDA view, capped) → gpu_memory_utilization=${GMEM_VAL} [${GMEM_MODE}]"
 if [ "$GMEM_MODE" = "fallback" ]; then
     echo "[auto-gmem] NOTE: estimate exceeded free VRAM; using clamped gmax — vLLM will trim KV at startup if needed"
