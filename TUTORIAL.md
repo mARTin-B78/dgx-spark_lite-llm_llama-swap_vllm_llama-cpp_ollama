@@ -438,10 +438,11 @@ See [LiteLLM/config.yaml.sample](LiteLLM/config.yaml.sample) for all models with
 
 ## Step 6 — Dynamic VRAM Launcher (any vLLM model)
 
-Two failure modes motivate a wrapper:
+Three failure modes motivate a wrapper:
 
 1. **Residual CUDA memory after model swap.** On unified-memory GB10, after the previous container exits the CUDA allocator can hold tens of GiB for several seconds. vLLM's startup check `free_memory >= gpu_memory_utilization × total` then fails with a hardcoded utilization.
 2. **Wrong static value across reboots / different co-resident loads.** A value tuned for an empty GPU is too high on a warm one (and vice versa).
+3. **System-RAM pressure.** GB10 unified memory becomes unstable above ~126.5 GB used. A vLLM pool that fits in CUDA's view can still push total system usage past that crash threshold when other workloads consume RAM.
 
 The repo ships a **generic adaptive launcher** at [llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) that:
 
@@ -449,10 +450,13 @@ The repo ships a **generic adaptive launcher** at [llama-swap/scripts/launch-vll
 2. Estimates **KV cache** from `config.json` (handles nested `text_config` for multimodal models):
    `kv_bytes ≈ 2 × num_hidden_layers × num_kv_heads × head_dim × max_model_len × max_num_seqs × kv_dtype_bytes`
 3. Adds a `SAFETY_GIB` headroom → `need_gib`.
-4. Queries free/total VRAM via `nvidia-smi` **run inside the same vLLM image** (so it sees CUDA's view, not host unified memory).
-5. Picks `util = need / total`, clamps to `[GMEM_MIN, GMEM_MAX]`, additionally caps at `(free − 1 GiB) / total`. Aborts if not even the cap fits.
+4. Reads `MemTotal` and `MemAvailable` from `/proc/meminfo` (works on GB10 where `nvidia-smi --query-gpu=memory.*` returns "Not Supported").
+5. Caps at `SYSTEM_RAM_CEILING_GIB` (default 117.81 GiB = 126.5 GB decimal) so `(MemTotal − ceiling)` GiB stays reserved no matter what the kernel reports as available.
+6. Picks `util = need / total`, clamps to `[GMEM_MIN, GMEM_MAX]`, additionally caps at `(free − GMEM_FREE_BUFFER_GIB) / total` (default 5 GiB buffer to bridge the `MemAvailable` vs `cudaMemGetInfo` race at vLLM startup). Aborts if not even the cap fits.
 
-This means most models can drop hardcoded `--gpu-memory-utilization` entirely.
+**Adaptive vs static — single env var:** set `GMEM_OVERRIDE` to a number (e.g. `0.7069`) to pin gpu_memory_utilization to that exact value and skip the calculation. Set it to `adaptive` (or leave it unset) to compute dynamically. One env-var flip switches a model between hand-tuned and adaptive without restructuring the block — useful when one specific model needs thermal-conscious pinning.
+
+This means every vLLM block can use the same launcher template; the only difference is which envs you set.
 
 **Wire it from `llama-swap/config.yaml`:**
 
@@ -489,7 +493,14 @@ This means most models can drop hardcoded `--gpu-memory-utilization` entirely.
 ```
 
 **Required env vars:** `MODEL_PATH` (in-container), `MODEL_HOST_PATH` (host — used to read `config.json` and stat safetensors), `CONTAINER_NAME`, `IMAGE`, `PORT`, `HOST`.
-**Tunables:** `MAX_MODEL_LEN`, `MAX_NUM_SEQS`, `KV_DTYPE_BYTES` (1 = fp8, 2 = bf16/fp16), `GMEM_MIN`, `GMEM_MAX`, `SAFETY_GIB`.
+
+**Adaptive bounds:** `MAX_MODEL_LEN`, `MAX_NUM_SEQS`, `KV_DTYPE_BYTES` (1 = fp8, 2 = bf16/fp16), `GMEM_MIN`, `GMEM_MAX`, `SAFETY_GIB`.
+
+**System guards:** `SYSTEM_RAM_CEILING_GIB` (default 117.81 = 126.5 GB), `GMEM_FREE_BUFFER_GIB` (default 5), `CUDA_OVERHEAD_GIB` (default 6.3 for GB10).
+
+**Image plumbing:** `EXTRA_DOCKER_ARGS` (extra mounts/envs as a single space-separated string), `PRE_LAUNCH_CMD` (in-container patch step run before `vllm serve`), `VLLM_SERVE_PREFIX` (set to `""` for `vllm/vllm-openai`-style images whose ENTRYPOINT is already `vllm serve`).
+
+**Static-pin mode:** `GMEM_OVERRIDE=0.7069` (or any 0–1 number) pins gpu_memory_utilization and skips the calculation. Unset / empty / `adaptive` = compute dynamically.
 
 Any args after the script name are forwarded verbatim to `vllm serve`.
 
@@ -749,7 +760,10 @@ When `--quality` is enabled the summary table grows a `Quality /100` column and 
 llama-swap assigns ports dynamically from its pool. Make sure the port range in config.yaml doesn't overlap with other services on the host.
 
 **vLLM startup check: `free_memory < gpu_memory_utilization × total`**
-After stopping one model container, the CUDA allocator on unified-memory systems can hold freed memory for several seconds. Replace the hardcoded `--gpu-memory-utilization` with the generic launcher [llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) (Step 6) — it sizes utilization from the model's actual weights+KV need vs. currently free VRAM, so the value adapts whether the GPU is cold or warm.
+Switch the model block to [llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) (Step 6) — it sizes utilization from the model's actual weights+KV need vs. currently free RAM and clamps to `[GMEM_MIN, GMEM_MAX]`. The default `GMEM_FREE_BUFFER_GIB=5` covers the small race between `MemAvailable` and `cudaMemGetInfo` at vLLM startup. Want a hand-tuned static value instead? Set `GMEM_OVERRIDE=0.7069` (or whichever number) — same launcher, single env-var flip.
+
+**System crashes near 126.5 GB used RAM**
+GB10 unified memory becomes unstable above this point. The launcher defaults `SYSTEM_RAM_CEILING_GIB=117.81` (= 126.5 GB decimal) so its calculation always reserves `(MemTotal − ceiling)` GiB even when `/proc/meminfo` says more is technically available. Override per-block with `SYSTEM_RAM_CEILING_GIB=...` if a specific workload needs more or less headroom.
 
 **Mamba/hybrid models need the tf5 image and an extra flag**
 Models using the Mamba SSM layers (Qwen3.5-122B-A10B, Qwen3.6-35B, Qwen3-Coder-Next) require `vllm-node-tf5:latest` (built with `--tf5`) and `--mamba-ssm-cache-dtype float16` in the vllm serve command.

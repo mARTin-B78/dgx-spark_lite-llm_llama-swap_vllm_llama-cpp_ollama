@@ -454,13 +454,11 @@ See [LiteLLM/config.yaml.sample](LiteLLM/config.yaml.sample) for the complete an
 
 ---
 
-## Step 9 — Dynamic launcher for large models (122B+)
+## Step 9 — Adaptive launcher (one launcher for all models)
 
-For any model that occupies >80 GB, residual CUDA memory from the previous model can cause vLLM's startup sanity check to fail (`free_memory < gpu_memory_utilization × total`).
+vLLM's startup check fails (`free_memory < gpu_memory_utilization × total`) whenever a hardcoded `--gpu-memory-utilization` is too high for what's actually free at launch time. On unified-memory GB10 this happens often: residual CUDA memory from a previous model lingers, page cache holds prior weights, etc. The fix is to compute `--gpu-memory-utilization` adaptively at launch time.
 
-Two launchers are provided:
-
-**Generic adaptive launcher** — [llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) — works for any vLLM model. It estimates required VRAM from `weights (safetensors) + KV cache (config.json) + safety` and picks the smallest `--gpu-memory-utilization` that fits, clamped to `[GMEM_MIN, GMEM_MAX]`. Fails fast if even the ceiling cannot fit.
+[llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) does this for any vLLM model. It estimates required VRAM from `weights (safetensors) + KV cache (config.json) + safety`, queries `/proc/meminfo`, applies a configurable system-RAM ceiling, and picks the smallest `--gpu-memory-utilization` that fits — or pins it to a static value if you supply one.
 
 ```yaml
   Qwen3.6-35B-A3B-FP8:
@@ -470,7 +468,7 @@ Two launchers are provided:
     cmd: >
       env
       MODEL_PATH=/models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
-      MODEL_HOST_PATH=/home/sparky/LLMs/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
+      MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
       CONTAINER_NAME=vllm-qwen3.6-35b-${PORT}
       IMAGE=vllm-node-tf5:latest
       PORT=${PORT} HOST=${host}
@@ -485,17 +483,43 @@ Two launchers are provided:
     cmdStop: "docker stop vllm-qwen3.6-35b-${PORT}"
 ```
 
-Tunables (env vars): `MAX_MODEL_LEN`, `MAX_NUM_SEQS`, `KV_DTYPE_BYTES` (1 = fp8, 2 = bf16/fp16), `GMEM_MIN`, `GMEM_MAX`, `SAFETY_GIB`.
+### Launcher env reference
 
-**122B-specific launcher** — [llama-swap/scripts/launch-qwen35-122b.sh](llama-swap/scripts/launch-qwen35-122b.sh) — used by the 122B INT4 model. Same idea but tuned for that model's known footprint.
+**Adaptive vs static — single knob:**
 
-```yaml
-  Qwen3.5-122B-A10B-int4-AutoRound:
-    ttl: 3600
-    readyTimeout: 1800
-    cmd: /app/scripts/launch-qwen35-122b.sh ${PORT} ${host}
-    cmdStop: "docker stop vllm-qwen3.5-122b-${PORT}"
-```
+| Env | Default | Effect |
+|---|---|---|
+| `GMEM_OVERRIDE` | unset | Numeric value (e.g. `0.7069`) pins gpu_memory_utilization to that exact value, bypassing the calculation entirely. Unset, empty, or `adaptive` = compute dynamically. **One line to flip a model between hand-tuned and adaptive.** |
+
+**Adaptive bounds (used when `GMEM_OVERRIDE` is unset):**
+
+| Env | Default | Purpose |
+|---|---|---|
+| `GMEM_MIN` | `0.55` | Floor for the computed value. Launcher fails fast if this can't fit. |
+| `GMEM_MAX` | `0.92` | Ceiling for the computed value. Use lower values for thermal- or workload-sensitive models. |
+| `SAFETY_GIB` | `4` | Headroom added to the weights+KV estimate. |
+| `KV_DTYPE_BYTES` | `1` | `1` for fp8, `2` for bf16/fp16. Drives KV-cache size estimate. |
+| `MAX_MODEL_LEN` | `131072` | Context length used in KV estimate (passed to vllm too). |
+| `MAX_NUM_SEQS` | `10` | Concurrent sequences used in KV estimate. |
+
+**System-wide guards:**
+
+| Env | Default | Purpose |
+|---|---|---|
+| `SYSTEM_RAM_CEILING_GIB` | `117.81` | Hard cap on total system RAM the launcher will plan against. Defaults to **126.5 GB decimal** because GB10 systems crash near this threshold. The launcher always reserves `(MemTotal - ceiling)` GiB, even when `/proc/meminfo` says more is available. |
+| `GMEM_FREE_BUFFER_GIB` | `5` | Buffer between launcher's view of free RAM and CUDA's. `MemAvailable` and `cudaMemGetInfo` can disagree by ~1 GiB at vLLM startup (kernel reclaims page cache during `cudaMalloc`, not before the check), so the launcher plans against `MemAvailable - 5 GiB`. |
+| `CUDA_OVERHEAD_GIB` | `6.3` | GiB of `MemTotal` not visible to CUDA on GB10 unified memory. |
+
+**Image / container plumbing:**
+
+| Env | Default | Purpose |
+|---|---|---|
+| `IMAGE` | required | Docker image (e.g. `vllm-node-tf5:latest`, `vllm/vllm-openai:...`). |
+| `EXTRA_DOCKER_ARGS` | empty | Extra `docker run` args (mounts, envs). Example: `'-e VLLM_USE_FLASHINFER_MOE_FP8=1 -v /host/mod:/mod:ro'`. |
+| `PRE_LAUNCH_CMD` | empty | Bash command run inside the container before `vllm serve`. Used for image patches (`bash run.sh`) or env setup. When set, the launcher uses `--entrypoint /bin/bash -c "PRE_LAUNCH_CMD && exec vllm serve …"`. |
+| `VLLM_SERVE_PREFIX` | `vllm serve` | Set to `""` (empty) for images whose ENTRYPOINT is already `vllm serve` (e.g. `vllm/vllm-openai`), so the model path and flags pass directly as entrypoint args. |
+
+**A second launcher** — [llama-swap/scripts/launch-qwen35-122b.sh](llama-swap/scripts/launch-qwen35-122b.sh) — exists for historical reasons (uses `nvidia-smi` instead of `/proc/meminfo`). The generic launcher above can replace it; pick whichever you prefer.
 
 ---
 
@@ -659,7 +683,10 @@ The summary table grows a `Quality /100` column when `--quality` is on. Per-mode
 Every group must be `swap: true` for solo models, or `exclusive: true` for L-tier. On 128 GB unified memory, even two 35B FP8 models at `gpu_mem=0.5` (64 GB each) can exceed safe limits. Tune per-model `gpu_memory_utilization` to fit your concurrent group math.
 
 **vLLM startup check fails: `free_memory < gpu_memory_utilization × total`**
-Use the generic adaptive launcher [llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) for any model where residual CUDA memory might bite — it estimates need from weights+KV+safety, queries free VRAM, and picks a fitting utilization in `[GMEM_MIN, GMEM_MAX]`. The 122B-specific launcher (Step 9) is a tuned variant. For M/S tier, `0.40` and `0.20` respectively are reliably safe as static values.
+Switch the model block to [llama-swap/scripts/launch-vllm-auto.sh](llama-swap/scripts/launch-vllm-auto.sh) (see Step 9 for the env-var reference). It picks a fitting `--gpu-memory-utilization` from actually-free RAM and clamps to `[GMEM_MIN, GMEM_MAX]`. To pin a model to a static value instead, set `GMEM_OVERRIDE=0.7069` (or whichever number) — single env-var flip, no restructuring. To pin a static value across the whole host, set `SYSTEM_RAM_CEILING_GIB` (defaults to `117.81`, = 126.5 GB decimal — the observed crash threshold on GB10).
+
+**System crashes at ~126.5 GB used RAM**
+GB10 unified memory becomes unstable above this point. The launcher above defaults to a `SYSTEM_RAM_CEILING_GIB=117.81` cap so the gmem calculation always reserves `(MemTotal - 117.81)` GiB of headroom even when `/proc/meminfo` says more is available. Override per-model with `SYSTEM_RAM_CEILING_GIB=...` if your specific workload tolerates more pressure.
 
 **Mamba/hybrid models crash at startup**
 Add `--mamba-ssm-cache-dtype float16` and use `vllm-node-tf5` (built with `--tf5`). The standard `vllm-node` image does not include transformers v5 patches required by Mamba hybrid architectures.
