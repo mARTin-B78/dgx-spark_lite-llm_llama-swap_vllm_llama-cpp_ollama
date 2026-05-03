@@ -25,8 +25,21 @@
 #   GMEM_MAX         ceiling (default 0.92)
 #   SAFETY_GIB       headroom on top of estimate (default 4)
 #   CUDA_OVERHEAD_GIB  GiB of MemTotal not visible to CUDA (default 6.3 for GB10)
+#   SYSTEM_RAM_CEILING_GIB
+#                    hard cap on total system RAM the launcher will plan
+#                    against. Defaults to 117.81 GiB (= 126.5 GB decimal),
+#                    because GB10 unified-memory systems crash near
+#                    126.5 GB of used RAM. The launcher leaves
+#                    (MemTotal - SYSTEM_RAM_CEILING_GIB) GiB always free.
+#                    Set higher only if your system tolerates more pressure.
 #
 # Optional env:
+#   GMEM_OVERRIDE      Either a numeric value (e.g. "0.40", "0.7069") to bypass
+#                      the adaptive calculation entirely and pin gpu_memory_utilization
+#                      to that value, or "adaptive" / unset / empty to compute it
+#                      dynamically based on free VRAM. Use this single knob to
+#                      switch a model between static and adaptive without
+#                      restructuring the model block.
 #   EXTRA_DOCKER_ARGS  extra `docker run` args, space-separated (mounts, envs).
 #                      Example: "-v /host/mod:/mod:ro -e VLLM_USE_FLASHINFER_MOE_FP8=1"
 #   PRE_LAUNCH_CMD     bash command to execute inside the container before
@@ -55,11 +68,34 @@ GMEM_MIN="${GMEM_MIN:-0.55}"
 GMEM_MAX="${GMEM_MAX:-0.92}"
 SAFETY_GIB="${SAFETY_GIB:-4}"
 CUDA_OVERHEAD_GIB="${CUDA_OVERHEAD_GIB:-6.3}"
+SYSTEM_RAM_CEILING_GIB="${SYSTEM_RAM_CEILING_GIB:-117.81}"
 # Realistic concurrent-prefill cap for the KV estimate. vLLM scales KV
 # dynamically, so estimating against the full MAX_NUM_SEQS overstates the
 # need by 5-10× for typical workloads. Default 4 keeps the gmem decision
 # in a useful range without blocking the launch.
 KV_BATCH_REALISTIC="${KV_BATCH_REALISTIC:-4}"
+
+# ── Static-override fast path ─────────────────────────────────────────────────
+# When GMEM_OVERRIDE is a number, skip the entire adaptive calculation and
+# pin gpu_memory_utilization to that value. Anything else (unset, empty,
+# "adaptive") falls through to the dynamic path below.
+GMEM_OVERRIDE="${GMEM_OVERRIDE:-}"
+if [ -n "$GMEM_OVERRIDE" ] && [ "$GMEM_OVERRIDE" != "adaptive" ]; then
+    if echo "$GMEM_OVERRIDE" | awk '{exit !($0+0 > 0 && $0+0 < 1)}'; then
+        GMEM_VAL="$GMEM_OVERRIDE"
+        GMEM_MODE="static-override"
+        echo "[auto-gmem] GMEM_OVERRIDE=$GMEM_OVERRIDE — bypassing adaptive calculation"
+        GMEM="$GMEM_VAL"
+        SKIP_ADAPTIVE=1
+    else
+        echo "[auto-gmem] FATAL: GMEM_OVERRIDE='$GMEM_OVERRIDE' is not a number in (0,1) and not 'adaptive'"
+        exit 1
+    fi
+else
+    SKIP_ADAPTIVE=0
+fi
+
+if [ "$SKIP_ADAPTIVE" = "0" ]; then
 
 # ── Estimate weights size (sum of *.safetensors) ──────────────────────────────
 WEIGHTS_BYTES=$(find "$MODEL_HOST_PATH" -maxdepth 1 -name '*.safetensors' \
@@ -119,12 +155,32 @@ NEED_GIB=$(awk -v w="$WEIGHTS_GIB" -v k="$KV_GIB" -v s="$SAFETY_GIB" \
 # /proc/meminfo gives kB. CUDA sees ~121.69 GiB on the GB10's 124.6 GiB
 # unified pool (~6.3 GiB difference for OS/driver), so subtract that overhead
 # from total to get CUDA's view.
+#
+# Then enforce SYSTEM_RAM_CEILING_GIB: GB10 systems crash near 126.5 GB
+# (~117.81 GiB) of used RAM, so we leave (MemTotal - ceiling) GiB always
+# free even if /proc/meminfo says more is available. This caps both the
+# total budget AND the free-memory window the gmem calculation sees.
 MEM_TOTAL_KB=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
 MEM_AVAIL_KB=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
-TOTAL_GIB=$(awk -v t="$MEM_TOTAL_KB" -v o="$CUDA_OVERHEAD_GIB" \
-    'BEGIN{printf "%.2f", t/1048576 - o}')
-FREE_GIB=$(awk -v a="$MEM_AVAIL_KB" -v o="$CUDA_OVERHEAD_GIB" \
-    'BEGIN{f=a/1048576 - o; if(f<0)f=0; printf "%.2f", f}')
+
+MEM_TOTAL_GIB_RAW=$(awk -v t="$MEM_TOTAL_KB" 'BEGIN{printf "%.2f", t/1048576}')
+MEM_AVAIL_GIB_RAW=$(awk -v a="$MEM_AVAIL_KB" 'BEGIN{printf "%.2f", a/1048576}')
+
+# Reserved headroom = MemTotal - ceiling (clamped to 0).
+HEADROOM_GIB=$(awk -v t="$MEM_TOTAL_GIB_RAW" -v c="$SYSTEM_RAM_CEILING_GIB" \
+    'BEGIN{h=t-c; if(h<0)h=0; printf "%.2f", h}')
+
+# Effective MemTotal for the calculation = min(actual MemTotal, ceiling).
+MEM_TOTAL_GIB_CAPPED=$(awk -v t="$MEM_TOTAL_GIB_RAW" -v c="$SYSTEM_RAM_CEILING_GIB" \
+    'BEGIN{m=(t<c?t:c); printf "%.2f", m}')
+
+TOTAL_GIB=$(awk -v t="$MEM_TOTAL_GIB_CAPPED" -v o="$CUDA_OVERHEAD_GIB" \
+    'BEGIN{printf "%.2f", t - o}')
+
+# Effective free = MemAvailable minus the reserved headroom (already-free
+# memory above the ceiling can't be safely allocated), then minus CUDA overhead.
+FREE_GIB=$(awk -v a="$MEM_AVAIL_GIB_RAW" -v h="$HEADROOM_GIB" -v o="$CUDA_OVERHEAD_GIB" \
+    'BEGIN{f=a - h - o; if(f<0)f=0; printf "%.2f", f}')
 
 # ── Compute utilization ───────────────────────────────────────────────────────
 # Don't fail-fast when need > free: the KV estimate is a worst-case cap, not
@@ -165,11 +221,14 @@ GMEM_MODE="${GMEM##*|}"
 
 echo "[auto-gmem] cfg: layers=$N_LAYERS kv_heads=$N_KV head_dim=$HEAD_DIM ctx=$MAX_MODEL_LEN batch=$MAX_NUM_SEQS kvb=$KV_DTYPE_BYTES kv_batch_used=$KV_BATCH"
 echo "[auto-gmem] weights=${WEIGHTS_GIB}GiB kv=${KV_GIB}GiB safety=${SAFETY_GIB}GiB → need=${NEED_GIB}GiB"
-echo "[auto-gmem] free=${FREE_GIB}GiB total=${TOTAL_GIB}GiB (CUDA view) → gpu_memory_utilization=${GMEM_VAL} [${GMEM_MODE}]"
+echo "[auto-gmem] system: MemTotal=${MEM_TOTAL_GIB_RAW}GiB MemAvail=${MEM_AVAIL_GIB_RAW}GiB ceiling=${SYSTEM_RAM_CEILING_GIB}GiB headroom_reserved=${HEADROOM_GIB}GiB"
+echo "[auto-gmem] free=${FREE_GIB}GiB total=${TOTAL_GIB}GiB (CUDA view, capped) → gpu_memory_utilization=${GMEM_VAL} [${GMEM_MODE}]"
 if [ "$GMEM_MODE" = "fallback" ]; then
     echo "[auto-gmem] NOTE: estimate exceeded free VRAM; using clamped gmax — vLLM will trim KV at startup if needed"
 fi
 GMEM="$GMEM_VAL"
+
+fi   # end if SKIP_ADAPTIVE == 0
 
 # Common docker args (network, GPU, base mounts/envs).
 DOCKER_BASE=(
