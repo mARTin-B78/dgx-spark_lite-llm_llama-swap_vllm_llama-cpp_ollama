@@ -63,8 +63,14 @@ SKIP_MODELS=()
 
 # Quality (tool-eval-bench) — opt-in second pass after llama-benchy, same load
 QUALITY=false
+QUALITY_ONLY=false            # skip llama-benchy, only run tool-eval-bench
 QUALITY_MODE="short"          # short | full | hardmode
 QUALITY_CATEGORIES=""         # optional letters, e.g. "K A J"
+QUALITY_SEED="42"             # default seed
+QUALITY_PRESSURE=""           # --context-pressure
+QUALITY_PRESSURE_SWEEP=""     # --context-pressure-sweep
+QUALITY_CONTEXT_SIZE=""       # --context-size
+QUALITY_EXTRA_ARGS=""         # catch-all for tunneled args
 QUALITY_DIR="$SCRIPT_DIR/test-results/quality"
 TOOLEVAL_CMD=""
 
@@ -72,9 +78,9 @@ TOOLEVAL_CMD=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --quick)
-            PP="512"
+            PP="2048"
             TG="128"
-            DEPTH="0"
+            DEPTH="0 16384"
             RUNS=1
             MODE="quick"
             shift
@@ -143,6 +149,11 @@ while [[ $# -gt 0 ]]; do
             QUALITY_MODE="${1#*=}"
             shift
             ;;
+        --quality-only)
+            QUALITY=true
+            QUALITY_ONLY=true
+            shift
+            ;;
         --quality-categories)
             QUALITY=true
             QUALITY_CATEGORIES="$2"
@@ -152,6 +163,26 @@ while [[ $# -gt 0 ]]; do
             QUALITY=true
             QUALITY_CATEGORIES="${1#*=}"
             shift
+            ;;
+        --seed)
+            QUALITY_SEED="$2"
+            shift 2
+            ;;
+        --context-pressure)
+            QUALITY_PRESSURE="$2"
+            shift 2
+            ;;
+        --context-pressure-sweep)
+            QUALITY_PRESSURE_SWEEP="$2"
+            shift 2
+            ;;
+        --context-size)
+            QUALITY_CONTEXT_SIZE="$2"
+            shift 2
+            ;;
+        --quality-args)
+            QUALITY_EXTRA_ARGS="$2"
+            shift 2
             ;;
         --help|-h)
             cat <<'HELPEOF'
@@ -187,6 +218,9 @@ Other options:
   --resume     Resume from the last interrupted session (skip already-completed models)
   --quality    After llama-benchy, also run tool-eval-bench (tool-call quality)
                on the same loaded model. Avoids the cost of a second load.
+  --quality-only
+               Skip llama-benchy entirely. Load the model, measure load
+               time, and run tool-eval-bench.
   --quality-mode MODE
                short    (default) — 15 core scenarios, ~2-5 min/model
                full     — 69 scenarios, ~15-30 min/model
@@ -194,6 +228,16 @@ Other options:
   --quality-categories "K A J"
                Run only specific tool-eval-bench category letters (A-P).
                Implies --quality.
+  --seed N     Random seed for tool-eval-bench (default: 42)
+  --context-pressure R
+               Set context pressure (0.0-1.0) for tool-eval-bench
+  --context-pressure-sweep START-END
+               Run a context pressure sweep (e.g. 0.7-1.0)
+  --context-size N
+               Explicitly set context window size for tool-eval-bench
+  --quality-args "ARGS"
+               Tunnel raw arguments directly to tool-eval-bench
+               Example: --quality-args "--temperature 0.0 --parallel 1"
   --help       Show this help
 
 Filters:
@@ -541,6 +585,28 @@ PYEOF
 QUALITY_SCORE=""
 QUALITY_RATING=""
 QUALITY_REPORT=""
+# Helper to look up max_len for a model. Mirrors the values in the RECIPES
+# dict inside generate_recipe_yaml (kept in sync manually — the previous
+# sed-extracts-then-exec approach broke on the first inner '}').
+get_model_max_len() {
+    local model="$1"
+    case "$model" in
+        Qwen3.5-35B-A3B-FP8)                                          echo 131072 ;;
+        Qwen3.5-122B-A10B-int4-AutoRound)                             echo  40960 ;;
+        Qwen3-VL-30B-A3B-Instruct-FP8)                                echo  32768 ;;
+        Qwen3-Omni-30B-A3B-Instruct)                                  echo  32768 ;;
+        Qwen3-Coder-Next-FP8-Dynamic)                                 echo  32768 ;;
+        Qwen3-Coder-Next-int4-AutoRound)                              echo  32768 ;;
+        Nemotron-3-Nano-4B-FP8)                                       echo   8192 ;;
+        Nemotron-3-Nano-30B-A3B-NVFP4)                                echo 131072 ;;
+        Nemotron-3-Super-120B-A12B-NVFP4)                             echo  65536 ;;
+        GPT-OSS-120B)                                                 echo  65536 ;;
+        Mistral-Small-24B-Instruct-2501)                              echo  32768 ;;
+        Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF)   echo  16384 ;;
+        *)                                                            echo "" ;;
+    esac
+}
+
 run_quality() {
     local model="$1"
     QUALITY_SCORE=""; QUALITY_RATING=""; QUALITY_REPORT=""
@@ -555,7 +621,19 @@ run_quality() {
     flags+=" --backend vllm"
     flags+=" --no-warmup"
     flags+=" --no-live"
-    flags+=" --seed 42"
+
+    # Handle context size: explicit flag > auto-detect from recipes
+    local ctx_size="$QUALITY_CONTEXT_SIZE"
+    if [[ -z "$ctx_size" ]]; then
+        ctx_size=$(get_model_max_len "$model")
+        [[ -n "$ctx_size" ]] && log "  ${DIM}Auto-detected context size from recipe: $ctx_size${NC}"
+    fi
+    [[ -n "$ctx_size" ]] && flags+=" --context-size $ctx_size"
+
+    [[ -n "$QUALITY_SEED" ]] && flags+=" --seed $QUALITY_SEED"
+    [[ -n "$QUALITY_PRESSURE" ]] && flags+=" --context-pressure $QUALITY_PRESSURE"
+    [[ -n "$QUALITY_PRESSURE_SWEEP" ]] && flags+=" --context-pressure-sweep $QUALITY_PRESSURE_SWEEP"
+    [[ -n "$QUALITY_EXTRA_ARGS" ]] && flags+=" $QUALITY_EXTRA_ARGS"
     flags+=" --output-dir $QUALITY_DIR"
 
     case "$QUALITY_MODE" in
@@ -605,10 +683,11 @@ run_quality() {
         QUALITY_REPORT=$(ls -t "$QUALITY_DIR"/*/report.md 2>/dev/null | head -n1)
     fi
 
-    # Echo the tool-eval-bench summary block (last 25 lines of stdout) to the
-    # main report so it ends up in the human-readable .txt output.
+    # Echo the tool-eval-bench summary block (last 25 lines of stdout) to BOTH
+    # the terminal and the main report file. The previous `>/dev/null` swallowed
+    # the nice summary in the terminal, so users only saw the parsed score line.
     log ""
-    tail -25 "$out_file" | tee -a "$REPORT_FILE" >/dev/null
+    tail -25 "$out_file" | tee -a "$REPORT_FILE"
     rm -f "$out_file"
 
     if [[ -n "$QUALITY_SCORE" ]]; then
@@ -1317,7 +1396,7 @@ IDX=0
 TOTAL_START=$(date +%s.%N)
 
 # Collect results for final summary
-declare -A SUMMARY_PP SUMMARY_TG SUMMARY_PEAK SUMMARY_TTFT SUMMARY_STATUS SUMMARY_DEGRADATION SUMMARY_QUALITY
+declare -A SUMMARY_PP SUMMARY_TG SUMMARY_PEAK SUMMARY_TTFT SUMMARY_STATUS SUMMARY_DEGRADATION SUMMARY_QUALITY SUMMARY_LOAD
 
 for MODEL in $MODELS; do
     IDX=$((IDX + 1))
@@ -1347,7 +1426,16 @@ for MODEL in $MODELS; do
 
     # Load this model
     WARMUP_FAIL_REASON=""
-    if ! warmup_model "$MODEL"; then
+    load_start=$(date +%s.%N)
+    if warmup_model "$MODEL"; then
+        warmup_ok=true
+    else
+        warmup_ok=false
+    fi
+    load_end=$(date +%s.%N)
+    SUMMARY_LOAD[$MODEL]=$(printf "%.1fs" "$(echo "$load_end - $load_start" | bc)")
+
+    if [[ "$warmup_ok" != true ]]; then
         FAIL=$((FAIL + 1))
         SUMMARY_STATUS[$MODEL]="${WARMUP_FAIL_REASON:-FAIL}"
         checkpoint_model_done "$MODEL" "${WARMUP_FAIL_REASON:-FAIL}"
@@ -1356,18 +1444,27 @@ for MODEL in $MODELS; do
     fi
 
     # Benchmark it
-    if run_benchy "$MODEL"; then
-        PASS=$((PASS + 1))
-        SUMMARY_STATUS[$MODEL]="OK"
-        checkpoint_model_done "$MODEL" "OK"
-        # In arena mode: generate recipe YAML and check vs personal best
-        if [[ "$MODE" == "arena" ]]; then
-            generate_recipe_yaml "$MODEL" 2>&1 | tee -a "$REPORT_FILE"
-            local arena_json="$RESULTS_DIR/${MODEL//\//_}_${TIMESTAMP}.json"
-            local arena_recipe="$ARENA_DIR/${MODEL//\//_}/recipe.yaml"
-            check_and_suggest_submit "$MODEL" "$arena_json" "$arena_recipe" 2>&1 | tee -a "$REPORT_FILE"
+    benchy_ok=true
+    if [[ "$QUALITY_ONLY" == true ]]; then
+        log "  ${DIM}Skipping llama-benchy (--quality-only)${NC}"
+    else
+        if run_benchy "$MODEL"; then
+            PASS=$((PASS + 1))
+            SUMMARY_STATUS[$MODEL]="OK"
+            checkpoint_model_done "$MODEL" "OK"
+            # In arena mode: generate recipe YAML and check vs personal best
+            if [[ "$MODE" == "arena" ]]; then
+                generate_recipe_yaml "$MODEL" 2>&1 | tee -a "$REPORT_FILE"
+                arena_json="$RESULTS_DIR/${MODEL//\//_}_${TIMESTAMP}.json"
+                arena_recipe="$ARENA_DIR/${MODEL//\//_}/recipe.yaml"
+                check_and_suggest_submit "$MODEL" "$arena_json" "$arena_recipe" 2>&1 | tee -a "$REPORT_FILE"
+            fi
+        else
+            benchy_ok=false
         fi
+    fi
 
+    if [[ "$benchy_ok" == true ]]; then
         # Extract numbers for final summary from JSON
         local_json="$RESULTS_DIR/${MODEL//\//_}_${TIMESTAMP}.json"
         if [[ -f "$local_json" ]]; then
@@ -1413,8 +1510,10 @@ for MODEL in $MODELS; do
             run_quality "$MODEL" || true
             if [[ -n "$QUALITY_SCORE" ]]; then
                 SUMMARY_QUALITY[$MODEL]="${QUALITY_SCORE}"
+                [[ "$QUALITY_ONLY" == true ]] && SUMMARY_STATUS[$MODEL]="OK" && PASS=$((PASS + 1)) && checkpoint_model_done "$MODEL" "OK"
             else
                 SUMMARY_QUALITY[$MODEL]="?"
+                [[ "$QUALITY_ONLY" == true ]] && SUMMARY_STATUS[$MODEL]="FAIL" && FAIL=$((FAIL + 1)) && checkpoint_model_done "$MODEL" "FAIL"
             fi
         fi
     else
@@ -1449,12 +1548,12 @@ log "  Checkpoint : $CHECKPOINT_FILE"
 log ""
 # Wider table when quality column is shown
 if [[ "$QUALITY" == true ]]; then
-    log "  ${BOLD}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s  %9s' 'Model' 'Read (pp)' 'Write (tg)' 'Peak' 'TTFT' 'Deep ctx' 'Quality')${NC}"
-    log "  ${DIM}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s  %9s' '' 'tok/s' 'tok/s' 'tok/s' 'ms' 'degradation' '/100')${NC}"
-    log "  $(printf '%.0s-' {1..117})"
+    log "  ${BOLD}$(printf '%-42s  %8s  %14s  %12s  %8s  %14s  %9s' 'Model' 'Load' 'Read (pp)' 'Write (tg)' 'Peak' 'Deep ctx' 'Quality')${NC}"
+    log "  ${DIM}$(printf '%-42s  %8s  %14s  %12s  %8s  %14s  %9s' '' 'sec' 'tok/s' 'tok/s' 'tok/s' 'degradation' '/100')${NC}"
+    log "  $(printf '%.0s-' {1..120})"
 else
-    log "  ${BOLD}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s' 'Model' 'Read (pp)' 'Write (tg)' 'Peak' 'TTFT' 'Deep ctx')${NC}"
-    log "  ${DIM}$(printf '%-42s  %14s  %12s  %8s  %8s  %14s' '' 'tok/s' 'tok/s' 'tok/s' 'ms' 'degradation')${NC}"
+    log "  ${BOLD}$(printf '%-42s  %8s  %14s  %12s  %8s  %14s' 'Model' 'Load' 'Read (pp)' 'Write (tg)' 'Peak' 'Deep ctx')${NC}"
+    log "  ${DIM}$(printf '%-42s  %8s  %14s  %12s  %8s  %14s' '' 'sec' 'tok/s' 'tok/s' 'tok/s' 'degradation')${NC}"
     log "  $(printf '%.0s-' {1..106})"
 fi
 
@@ -1472,23 +1571,23 @@ for MODEL in $MODELS; do
 
     if [[ "$status" == "OK" ]]; then
         if [[ "$QUALITY" == true ]]; then
-            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s  %9s" "$local_name" "$pp" "$tg" "$peak" "$ttft" "$degrad" "$quality"
+            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s  %9s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "$pp" "$tg" "$peak" "$degrad" "$quality"
         else
-            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "$pp" "$tg" "$peak" "$ttft" "$degrad"
+            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "$pp" "$tg" "$peak" "$degrad"
         fi
         log "${GREEN}${line}${NC}"
     elif [[ "$status" == "INCOHERENT" ]]; then
         if [[ "$QUALITY" == true ]]; then
-            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s  %9s" "$local_name" "INCOHERENT" "—" "—" "—" "—" "—"
+            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s  %9s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "INCOHERENT" "—" "—" "—" "—"
         else
-            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "INCOHERENT" "—" "—" "—" "—"
+            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "INCOHERENT" "—" "—" "—"
         fi
         log "${YELLOW}${line}${NC}"
     else
         if [[ "$QUALITY" == true ]]; then
-            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s  %9s" "$local_name" "FAIL" "—" "—" "—" "—" "—"
+            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s  %9s" "$local_name" "—" "FAIL" "—" "—" "—" "—"
         else
-            printf -v line "  %-42s  %14s  %12s  %8s  %8s  %14s" "$local_name" "FAIL" "—" "—" "—" "—"
+            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s" "$local_name" "—" "FAIL" "—" "—" "—"
         fi
         log "${RED}${line}${NC}"
     fi
