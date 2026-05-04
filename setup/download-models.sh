@@ -92,10 +92,17 @@ if command -v python3 &> /dev/null; then
 fi
 
 # Check for HF_TOKEN
+HF_AUTH_ARGS=()
 if [ -z "$HF_TOKEN" ]; then
     print_warning "HF_TOKEN not set in .env"
     print_info "Some models may be rate-limited without a token"
     echo "To set it: export HF_TOKEN=hf_..."
+else
+    # huggingface_hub reads HF_TOKEN from env, but export it explicitly so
+    # subprocesses (and the hf CLI) pick it up. Pass --token too as a belt-and-braces.
+    export HF_TOKEN
+    HF_AUTH_ARGS=(--token "$HF_TOKEN")
+    print_success "HF_TOKEN loaded from .env (authenticated downloads)"
 fi
 
 ###############################################################################
@@ -114,7 +121,7 @@ if [ "$INSTALL_S_TIER" = "true" ]; then
     
     for model in "${MODELS[@]}"; do
         print_info "Downloading $model..."
-        if hf download "$model" --repo-type model --local-dir "$LLM_ROOT_PATH/vllm/$model" 2>&1 | tail -5; then
+        if hf download "$model" --repo-type model --local-dir "$LLM_ROOT_PATH/vllm/$model" "${HF_AUTH_ARGS[@]}" 2>&1 | tail -5; then
             print_success "Downloaded: $model"
         else
             print_warning "Failed to download $model (may already exist)"
@@ -138,7 +145,7 @@ if [ "$INSTALL_M_TIER" = "true" ]; then
     
     for model in "${MODELS[@]}"; do
         print_info "Downloading $model..."
-        if hf download "$model" --repo-type model --local-dir "$LLM_ROOT_PATH/vllm/$model" 2>&1 | tail -5; then
+        if hf download "$model" --repo-type model --local-dir "$LLM_ROOT_PATH/vllm/$model" "${HF_AUTH_ARGS[@]}" 2>&1 | tail -5; then
             print_success "Downloaded: $model"
         else
             print_warning "Failed to download $model (may already exist or requires approval)"
@@ -168,7 +175,7 @@ if [ "$INSTALL_L_TIER" = "true" ]; then
         for model in "${MODELS[@]}"; do
             print_info "Downloading $model..."
             print_warning "This may take 30+ minutes depending on internet speed"
-            if hf download "$model" --repo-type model --local-dir "$LLM_ROOT_PATH/vllm/$model" 2>&1 | tail -5; then
+            if hf download "$model" --repo-type model --local-dir "$LLM_ROOT_PATH/vllm/$model" "${HF_AUTH_ARGS[@]}" 2>&1 | tail -5; then
                 print_success "Downloaded: $model"
             else
                 print_warning "Failed to download $model (may require approval or API access)"
@@ -199,7 +206,7 @@ if [ "$INSTALL_GGUF" = "true" ]; then
     for model in "${GGUF_MODELS[@]}"; do
         print_info "Downloading $model (Q4_K_M only)..."
         # Only download Q4_K_M quantization to save disk space (20-30 GB instead of 100+ GB)
-        if hf download "$model" --repo-type model --include "*Q4_K_M*" --local-dir "$LLM_ROOT_PATH/gguf/$model" 2>&1 | tail -5; then
+        if hf download "$model" --repo-type model --include "*Q4_K_M*" --local-dir "$LLM_ROOT_PATH/gguf/$model" "${HF_AUTH_ARGS[@]}" 2>&1 | tail -5; then
             print_success "Downloaded: $model"
         else
             print_warning "Failed to download $model"
