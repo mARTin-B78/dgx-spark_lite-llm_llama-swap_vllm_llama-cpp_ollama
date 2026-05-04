@@ -4,7 +4,10 @@
 set -e
 
 # --- CONFIGURATION ---
-REPO_ROOT=~/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama
+# Resolve the repo root from the script's own location so this works no matter
+# where the user cloned the repo (do not assume ~/Docker/...).
+# Allow REPO_ROOT to be overridden via env if needed.
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 REGISTRY="ghcr.io"
 
 # 1. Load variables from .env if it exists

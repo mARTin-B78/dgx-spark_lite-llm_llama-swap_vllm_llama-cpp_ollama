@@ -44,7 +44,7 @@ ask_yes_no() {
     local prompt="$1"
     local response
     while true; do
-        read -p "$(echo -e ${BLUE}$prompt${NC} ' (y/n): ')" response
+        read -p "$(echo -e ${BLUE}$prompt${NC} ' (y/n): ')" response </dev/tty
         case "$response" in
             [yY][eE][sS]|[yY]) return 0 ;;
             [nN][oO]|[nN]) return 1 ;;
@@ -57,7 +57,10 @@ ask_input() {
     local prompt="$1"
     local default="$2"
     local response
-    read -p "$(echo -e ${BLUE}$prompt${NC}) [$default]: " response
+    # Read from /dev/tty so input works even when this function is invoked
+    # inside command substitution (NAME=$(ask_input ...)). Without this,
+    # some shells/terminals drop the keystrokes and the default is silently used.
+    read -p "$(echo -e ${BLUE}$prompt${NC}) [$default]: " response </dev/tty
     echo "${response:-$default}"
 }
 
@@ -157,16 +160,34 @@ if check_container_running "portainer"; then
     PORTAINER_PORT=9000
     PORTAINER_CONFIGURED=true
 elif ask_yes_no "Install Portainer?"; then
-    PORTAINER_PORT=$(ask_input "Portainer port" "9000")
-    
+    PORTAINER_PORT=$(ask_input "Portainer port (HTTPS UI)" "9443")
+
     # Check if port is in use
     if check_port_in_use "$PORTAINER_PORT"; then
         print_warning "Port $PORTAINER_PORT is already in use"
-        PORTAINER_PORT=$(ask_input "Enter a different port" "9001")
+        PORTAINER_PORT=$(ask_input "Enter a different port" "9444")
     fi
-    
-    print_success "Will use port $PORTAINER_PORT for Portainer"
-    PORTAINER_CONFIGURED=true
+
+    print_info "Pulling and starting portainer/portainer-ce:latest on port $PORTAINER_PORT..."
+    if docker volume inspect portainer_data >/dev/null 2>&1; then
+        print_info "Reusing existing portainer_data volume"
+    else
+        docker volume create portainer_data >/dev/null
+    fi
+
+    if docker run -d \
+        --name portainer \
+        --restart=always \
+        -p "${PORTAINER_PORT}:9443" \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v portainer_data:/data \
+        portainer/portainer-ce:latest >/dev/null; then
+        print_success "Portainer started: https://localhost:${PORTAINER_PORT}"
+        PORTAINER_CONFIGURED=true
+    else
+        print_error "Failed to start Portainer container (see docker output above)"
+        PORTAINER_CONFIGURED=false
+    fi
 else
     print_info "Skipping Portainer installation"
     PORTAINER_CONFIGURED=false
@@ -409,7 +430,7 @@ echo "Storage Path:     $LLM_ROOT_PATH"
 echo "Repo Path:        $REPO_CONFIG_PATH"
 echo ""
 echo -e "${BLUE}Services:${NC}"
-[ "$PORTAINER_CONFIGURED" = "true" ] && echo "  ✅ Portainer:    http://localhost:$PORTAINER_PORT"
+[ "$PORTAINER_CONFIGURED" = "true" ] && echo "  ✅ Portainer:    https://localhost:$PORTAINER_PORT"
 [ "$LITELLM_CONFIGURED" = "true" ] && echo "  ✅ LiteLLM:      http://localhost:$LITELLM_PORT"
 [ "$LLAMACPP_CONFIGURED" = "true" ] && echo "  ✅ llama.cpp:    http://localhost:$LLAMACPP_PORT"
 [ "$OLLAMA_CONFIGURED" = "true" ] && echo "  ✅ Ollama:       http://localhost:$OLLAMA_PORT"

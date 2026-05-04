@@ -125,8 +125,6 @@ For detailed step-by-step instructions with explanations, see [TUTORIAL.md](TUTO
 
 **Step 1 — Create the Docker network**
 
-**Step 1 — Create the Docker network**
-
 All containers share one bridge network so they can resolve each other by name (e.g. `http://llama-swap:8080`):
 
 ```bash
