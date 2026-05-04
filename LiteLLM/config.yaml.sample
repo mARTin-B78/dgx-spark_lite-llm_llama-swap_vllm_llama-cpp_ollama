@@ -37,6 +37,7 @@ model_list:
     # api_base: "http://ollama:11434/v1"
       api_base: "http://llama-swap:8080/v1"
       api_key: "sk-your-litellm-master-key"
+   #  max_tokens: 4096
       max_tokens: 32768
       roles:
         system: "user"
@@ -57,7 +58,7 @@ model_list:
   # 🦙 LLAMA-SWAP MODELS (DGX Local)
   # ===================================================
 
-# --- Qwen 3.5/3.6 Series (Reasoning Models) ---
+# --- Qwen 3.5 Series (Native Reasoning) ---
   - model_name: Qwen3.5-35B-A3B-FP8
     litellm_params:
       model: openai/Qwen3.5-35B-A3B-FP8
@@ -66,11 +67,14 @@ model_list:
       drop_params: true
       include_reasoning: true 
       supports_reasoning: true
+      # This ensures the <think> tags stay in the text stream
       merge_reasoning_content_in_choices: true
       extra_body:
-        enable_thinking: true
-      max_tokens: 4096
+        enable_thinking: true  # Specific for Qwen 3.5 vLLM deployments
+        chat_template_kwargs: {"enable_thinking": true}
+      max_tokens: 4096 # Changed from 8192 to allow more input tokens
 
+# --- Qwen 3.6 Series ---
   - model_name: Qwen3.6-35B-A3B-FP8
     litellm_params:
       model: openai/Qwen3.6-35B-A3B-FP8
@@ -146,9 +150,29 @@ model_list:
       model: openai/Nemotron-3-Nano-30B-A3B-NVFP4
       api_base: "http://llama-swap:8080/v1"
       api_key: "sk-your-litellm-master-key"
-      include_reasoning: true 
+      include_reasoning: true
       supports_reasoning: true
       # FIXED: This merges the <think> blocks so the UI doesn't break
+      merge_reasoning_content_in_choices: true
+
+  # --- NVIDIA Nemotron-3 Nano-Omni (Multimodal: text + image + audio, FP8) ---
+  # - model_name: Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8
+  #   litellm_params:
+  #     model: openai/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8
+  #     api_base: "http://llama-swap:8080/v1"
+  #     api_key: "sk-your-litellm-master-key"
+  #     include_reasoning: true
+  #     supports_reasoning: true
+  #     merge_reasoning_content_in_choices: true
+
+  # --- NVIDIA Nemotron-3 Nano-Omni (Multimodal: text + image + audio, NVFP4) ---
+  - model_name: Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+    litellm_params:
+      model: openai/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "sk-your-litellm-master-key"
+      include_reasoning: true
+      supports_reasoning: true
       merge_reasoning_content_in_choices: true
 
 # --- NVIDIA Nemotron-3 Super (Advanced 120B Reasoning & CUTLASS Speed) ---
@@ -170,19 +194,19 @@ model_list:
       api_key: "sk-your-litellm-master-key"
       include_reasoning: true 
       supports_reasoning: true
-      merge_reasoning_content_in_choices: true
+      merge_reasoning_content_in_choices: false
 
   # --- Mistral (Strong Logic, but usually skips <think> tags) ---
-  - model_name: Mistral-Small-24B-Instruct-2501
-    litellm_params:
-      model: openai/Mistral-Small-24B-Instruct-2501
-      api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
-      # Usually a standard chat model, but very capable. 
-      # Keep these false unless you force tags in the system prompt.
-      include_reasoning: false
-      supports_reasoning: true
-      merge_reasoning_content_in_choices: true
+ # - model_name: Mistral-Small-24B-Instruct-2501
+#    litellm_params:
+#      model: openai/Mistral-Small-24B-Instruct-2501
+#      api_base: "http://llama-swap:8080/v1"
+#      api_key: "sk-your-litellm-master-key"
+#      # Usually a standard chat model, but very capable. 
+#      # Keep these false unless you force tags in the system prompt.
+#      include_reasoning: false
+#      supports_reasoning: true
+#      merge_reasoning_content_in_choices: true
 
   # ===================================================
   # 🎭 CLAUDE CODE COMPATIBILITY LAYER
@@ -215,6 +239,13 @@ litellm_settings:
   set_verbose: false
   request_timeout: 900
   merge_reasoning_content_in_choices: true
-  stream: true 
+  stream: true
+  # Prevent LiteLLM from health-checking all models on startup —
+  # that would trigger llama-swap to load every model simultaneously.
+  health_check_interval: 0
+  # Never retry or fall back to another model on timeout/failure;
+  # let the caller decide what to do.
+  num_retries: 0
+  fallbacks: []
 # stream_timeout: 5
-# database_url: "postgresql://litellm_admin:your-postgres-password@litellm-db:5432/litellm"
+# database_url: "postgresql://litellm_admin:LiteLLM-PostGres-PW@litellm-db:5432/litellm"
