@@ -74,6 +74,392 @@ QUALITY_EXTRA_ARGS=""         # catch-all for tunneled args
 QUALITY_DIR="$SCRIPT_DIR/test-results/quality"
 TOOLEVAL_CMD=""
 
+# ---------------------------------------------------------------------------
+# Interactive wizard
+# ---------------------------------------------------------------------------
+# When the script is invoked with NO arguments and stdin is a TTY, show a
+# guided menu instead of dumping a wall of help. The wizard fetches the live
+# model list from llama-swap, lets the user pick models + tests, then
+# rewrites the positional args so the normal arg-parser below handles the
+# rest. Pass --no-wizard or any flag to skip.
+# ---------------------------------------------------------------------------
+
+HAS_GUM=false
+command -v gum >/dev/null 2>&1 && HAS_GUM=true
+
+_wiz_say() { printf '\033[1m%s\033[0m\n' "$1"; }
+_wiz_dim() { printf '\033[2m%s\033[0m\n' "$1"; }
+_wiz_warn(){ printf '\033[1;33m%s\033[0m\n' "$1"; }
+
+# Pretty step header — mimics the openclaw / charm `huh` look:
+#   ◇ Step title
+#     value or sub-content
+_wiz_step() {
+    local title="$1"
+    if $HAS_GUM; then
+        # Magenta diamond + bold title
+        gum style --foreground 212 "◇ $(gum style --bold "$title")" >&2
+    else
+        printf '\n\033[1;35m◇\033[0m \033[1m%s\033[0m\n' "$title" >&2
+    fi
+}
+
+# Boxed sub-section (rounded border, indented one level)
+_wiz_box() {
+    local content="$1"
+    if $HAS_GUM; then
+        gum style --border rounded --padding "0 1" --margin "0 0 0 4" \
+            --border-foreground 240 "$content" >&2
+    else
+        printf '    \033[2m┌──────────────────────────────────────────\033[0m\n' >&2
+        printf '    \033[2m│\033[0m %s\n' "$content" >&2
+        printf '    \033[2m└──────────────────────────────────────────\033[0m\n' >&2
+    fi
+}
+
+# multi-select prompt: prints chosen indices (one per line) on stdout.
+# Args: "<header>" "opt1" "opt2" ...
+_wiz_multiselect() {
+    local header="$1"; shift
+    local -a opts=("$@")
+    local i
+
+    if $HAS_GUM; then
+        # `gum choose --no-limit` returns the chosen strings. We map back to
+        # indices. Pre-select everything by passing --selected with all opts.
+        local selected_arg
+        selected_arg=$(IFS=,; echo "${opts[*]}")
+        local picks
+        picks=$(printf '%s\n' "${opts[@]}" | gum choose \
+            --no-limit \
+            --header "$header" \
+            --header.foreground=212 \
+            --cursor-prefix "[ ] " \
+            --selected-prefix "[x] " \
+            --unselected-prefix "[ ] " \
+            --selected="$selected_arg" \
+            --height 20 \
+            </dev/tty) || picks=""
+        # Map each chosen string back to its index in opts.
+        local pick
+        while IFS= read -r pick; do
+            [[ -z "$pick" ]] && continue
+            for i in "${!opts[@]}"; do
+                if [[ "${opts[$i]}" == "$pick" ]]; then
+                    echo "$i"
+                    break
+                fi
+            done
+        done <<<"$picks"
+        return
+    fi
+
+    # ----- Fallback: numeric toggle UI -----
+    local -a sel=()
+    for i in "${!opts[@]}"; do sel[i]=1; done
+
+    while true; do
+        printf '\n\033[1m%s\033[0m\n' "$header" >&2
+        for i in "${!opts[@]}"; do
+            if [[ ${sel[i]:-0} -eq 1 ]]; then
+                printf '  \033[32m[%2d] [x]\033[0m %s\n' "$((i+1))" "${opts[i]}" >&2
+            else
+                printf '  [%2d] [ ] %s\n' "$((i+1))" "${opts[i]}" >&2
+            fi
+        done
+        printf '\n  \033[2mEnter numbers to toggle (e.g. "1 3 5"), "a"=all, "n"=none, ENTER=done\033[0m\n' >&2
+        local input
+        read -r -p "  > " input </dev/tty || input=""
+        [[ -z "$input" ]] && break
+        case "$input" in
+            a|A|all)  for i in "${!opts[@]}"; do sel[i]=1; done ;;
+            n|N|none) for i in "${!opts[@]}"; do sel[i]=0; done ;;
+            *)
+                local n idx
+                for n in $input; do
+                    [[ "$n" =~ ^[0-9]+$ ]] || continue
+                    idx=$((n-1))
+                    [[ $idx -lt 0 || $idx -ge ${#opts[@]} ]] && continue
+                    if [[ ${sel[idx]:-0} -eq 1 ]]; then sel[idx]=0; else sel[idx]=1; fi
+                done
+                ;;
+        esac
+    done
+    for i in "${!opts[@]}"; do
+        [[ ${sel[i]:-0} -eq 1 ]] && echo "$i"
+    done
+}
+
+# single-choice prompt: prints chosen INDEX (0-based) on stdout.
+# Args: "<header>" <default-index> "opt1" "opt2" ...
+_wiz_singlechoice() {
+    local header="$1"; local default_idx="$2"; shift 2
+    local -a opts=("$@")
+    local i
+
+    if $HAS_GUM; then
+        local pick
+        pick=$(printf '%s\n' "${opts[@]}" | gum choose \
+            --header "$header" \
+            --header.foreground=212 \
+            --selected="${opts[$default_idx]}" \
+            --height 12 \
+            </dev/tty) || pick=""
+        if [[ -z "$pick" ]]; then
+            echo "$default_idx"
+            return
+        fi
+        for i in "${!opts[@]}"; do
+            if [[ "${opts[$i]}" == "$pick" ]]; then echo "$i"; return; fi
+        done
+        echo "$default_idx"
+        return
+    fi
+
+    # ----- Fallback: numbered prompt -----
+    local input
+    while true; do
+        printf '\n\033[1m%s\033[0m\n' "$header" >&2
+        for i in "${!opts[@]}"; do
+            if [[ $i -eq $default_idx ]]; then
+                printf '  \033[32m[%d]\033[0m %s  \033[2m(default)\033[0m\n' "$((i+1))" "${opts[i]}" >&2
+            else
+                printf '  [%d] %s\n' "$((i+1))" "${opts[i]}" >&2
+            fi
+        done
+        read -r -p "  > " input </dev/tty || input=""
+        if [[ -z "$input" ]]; then
+            echo "$default_idx"
+            return
+        fi
+        if [[ "$input" =~ ^[0-9]+$ ]] && [[ $input -ge 1 && $input -le ${#opts[@]} ]]; then
+            echo "$((input-1))"
+            return
+        fi
+        printf '  \033[1;33m  Please enter 1-%d.\033[0m\n' "${#opts[@]}" >&2
+    done
+}
+
+# Free-text input. Args: "<prompt>" "<placeholder>"
+_wiz_input() {
+    local prompt="$1" placeholder="${2:-}"
+    if $HAS_GUM; then
+        gum input --prompt "  > " --placeholder "$placeholder" --header "$prompt" </dev/tty
+    else
+        printf '\n\033[1m%s\033[0m\n' "$prompt" >&2
+        [[ -n "$placeholder" ]] && printf '  \033[2m(%s)\033[0m\n' "$placeholder" >&2
+        local input
+        read -r -p "  > " input </dev/tty || input=""
+        echo "$input"
+    fi
+}
+
+# Yes/No confirm. Args: "<prompt>" [default-yes|default-no]
+_wiz_confirm() {
+    local prompt="$1" default="${2:-default-yes}"
+    if $HAS_GUM; then
+        if [[ "$default" == "default-no" ]]; then
+            gum confirm --default=false "$prompt" </dev/tty
+        else
+            gum confirm --default=true "$prompt" </dev/tty
+        fi
+        return $?
+    fi
+    local input
+    local hint="[Y/n]"
+    [[ "$default" == "default-no" ]] && hint="[y/N]"
+    printf '\n\033[1m%s\033[0m %s ' "$prompt" "$hint" >&2
+    read -r input </dev/tty || input=""
+    if [[ -z "$input" ]]; then
+        [[ "$default" == "default-no" ]] && return 1 || return 0
+    fi
+    case "$input" in
+        y|Y|yes|YES) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+run_wizard() {
+    # Output goes to STDERR so the function's stdout stays clean for capturing
+    # the resulting argv (we use a global array, but stderr-only chrome means
+    # nothing visual leaks if a caller ever did capture stdout).
+    if $HAS_GUM; then
+        gum style \
+            --border double --padding "1 3" --margin "1 0" \
+            --border-foreground 212 --foreground 212 --bold \
+            "DGX Spark Benchmark — Interactive Setup" \
+            "" \
+            "powered by llama-benchy     (github.com/eugr/llama-benchy)" \
+            "powered by tool-eval-bench  (github.com/SeraphimSerapis/tool-eval-bench)" >&2
+    else
+        {
+            printf '\n\033[1m============================================================\033[0m\n'
+            printf   '\033[1m  DGX Spark Benchmark — Interactive Setup\033[0m\n'
+            printf   '\033[1m  powered by llama-benchy     (github.com/eugr/llama-benchy)\033[0m\n'
+            printf   '\033[1m  powered by tool-eval-bench  (github.com/SeraphimSerapis/tool-eval-bench)\033[0m\n'
+            printf   '\033[1m============================================================\033[0m\n'
+        } >&2
+    fi
+    {
+        printf '  No flags given — launching the guided setup.\n'
+        printf '  \033[2m(Pass any flag, e.g. --quick, or BENCH_NO_WIZARD=1 to skip. --help for CLI.)\033[0m\n'
+        if ! $HAS_GUM; then
+            printf '  \033[2mTip: install \033[0m\033[1mgum\033[0m\033[2m for an arrow-key TUI:\033[0m\n'
+            printf '  \033[2m     https://github.com/charmbracelet/gum#installation\033[0m\n'
+        fi
+    } >&2
+
+    # Fetch live model list from llama-swap.
+    local models_json
+    models_json=$(curl -sf --max-time 5 "$LLAMA_SWAP_URL/v1/models" 2>/dev/null) || true
+    if [[ -z "$models_json" ]]; then
+        printf '\n\033[0;31m  Could not reach llama-swap at %s\033[0m\n' "$LLAMA_SWAP_URL" >&2
+        printf '  \033[2mStart the stack first (docker compose up -d) and try again.\033[0m\n' >&2
+        return 1
+    fi
+    local -a all_models
+    mapfile -t all_models < <(echo "$models_json" | jq -r '.data[].id' | sort)
+    if [[ ${#all_models[@]} -eq 0 ]]; then
+        printf '\n\033[0;31m  llama-swap returned no models.\033[0m\n' >&2
+        return 1
+    fi
+
+    # --- 1. Model selection ----------------------------------------------
+    _wiz_step "Step 1/4 — Which models? (${#all_models[@]} available)"
+    if $HAS_GUM; then
+        _wiz_dim "  Use ↑/↓, SPACE to toggle, ENTER to confirm. Defaults to all selected." >&2
+    fi
+    local -a chosen_idx
+    mapfile -t chosen_idx < <(_wiz_multiselect "Pick models (space to toggle)" "${all_models[@]}")
+    if [[ ${#chosen_idx[@]} -eq 0 ]]; then
+        printf '\n\033[1;33m  No models selected — aborting.\033[0m\n' >&2
+        return 1
+    fi
+    local -a chosen_models=()
+    local idx
+    for idx in "${chosen_idx[@]}"; do chosen_models+=("${all_models[$idx]}"); done
+    _wiz_box "$(printf '%d models selected\n%s' "${#chosen_models[@]}" "$(printf '  • %s\n' "${chosen_models[@]}")")"
+
+    # --- 2. Which tests --------------------------------------------------
+    _wiz_step "Step 2/4 — Which tests?"
+    local tests_idx
+    tests_idx=$(_wiz_singlechoice "Test mode" 0 \
+        "Speed only         — llama-benchy (pp/tg/depth)" \
+        "Quality only       — tool-eval-bench (tool-call accuracy)" \
+        "Speed AND Quality  — both passes on the same loaded model")
+    local want_speed=false want_quality=false
+    case "$tests_idx" in
+        0) want_speed=true ;;
+        1) want_quality=true ;;
+        2) want_speed=true; want_quality=true ;;
+    esac
+    local tests_summary=""
+    [[ "$want_speed"   == true ]] && tests_summary+="llama-benchy (speed)  "
+    [[ "$want_quality" == true ]] && tests_summary+="tool-eval-bench (quality)"
+    _wiz_box "$tests_summary"
+
+    # --- 3a. Speed profile (if speed selected) ---------------------------
+    local speed_flag="" speed_label=""
+    if [[ "$want_speed" == true ]]; then
+        _wiz_step "Step 3/4 — Speed profile (llama-benchy)"
+        local speed_idx
+        speed_idx=$(_wiz_singlechoice "Profile" 0 \
+            "Medium Log    — pp2048 tg128 depth=0,16384  3 runs   (default, ~5 min/model)" \
+            "Quick smoke   — pp2048 tg128 depth=0,16384  1 run    (fast sanity check)" \
+            "Stress        — adds depth=32768  3 runs              (find memory bottleneck)" \
+            "Extreme       — adds depth=65535  3 runs              (~200 page corpus)" \
+            "Full sweep    — pp512+2048 tg128+256+512 depths 0-32k (broad)" \
+            "Arena         — official spark-arena.com profile      (leaderboard submission)")
+        case "$speed_idx" in
+            0) speed_flag="";          speed_label="Medium Log (default)" ;;
+            1) speed_flag="--quick";   speed_label="Quick smoke" ;;
+            2) speed_flag="--stress";  speed_label="Stress (+32k)" ;;
+            3) speed_flag="--extreme"; speed_label="Extreme (+65k)" ;;
+            4) speed_flag="--full";    speed_label="Full sweep" ;;
+            5) speed_flag="--arena";   speed_label="Arena profile" ;;
+        esac
+        _wiz_box "$speed_label"
+    fi
+
+    # --- 3b. Quality mode (if quality selected) --------------------------
+    local quality_flags=() quality_label=""
+    if [[ "$want_quality" == true ]]; then
+        _wiz_step "Step 3/4 — Quality mode (tool-eval-bench)"
+        local q_idx
+        q_idx=$(_wiz_singlechoice "Quality mode" 0 \
+            "Short    — 15 core scenarios   (~2-5 min/model)" \
+            "Full     — 69 scenarios        (~15-30 min/model)" \
+            "Hardmode — full + 5 adversarial scenarios")
+        case "$q_idx" in
+            0) quality_flags+=("--quality-mode" "short");    quality_label="short" ;;
+            1) quality_flags+=("--quality-mode" "full");     quality_label="full" ;;
+            2) quality_flags+=("--quality-mode" "hardmode"); quality_label="hardmode" ;;
+        esac
+        if [[ "$want_speed" == false ]]; then
+            quality_flags+=("--quality-only")
+        else
+            quality_flags+=("--quality")
+        fi
+
+        local cats_input
+        cats_input=$(_wiz_input "Optional: restrict to specific categories? (letters A-P, space-separated; ENTER=all)" \
+                                "e.g. K A J  —  see github.com/SeraphimSerapis/tool-eval-bench#categories")
+        if [[ -n "$cats_input" ]]; then
+            quality_flags+=("--quality-categories" "$cats_input")
+            quality_label+=" (categories: $cats_input)"
+        fi
+        _wiz_box "$quality_label"
+    fi
+
+    # --- 4. Confirm ------------------------------------------------------
+    # Build the equivalent CLI command for display + the argv we'll inject.
+    local -a built_argv=()
+    [[ -n "$speed_flag" ]] && built_argv+=("$speed_flag")
+    if [[ ${#quality_flags[@]} -gt 0 ]]; then
+        built_argv+=("${quality_flags[@]}")
+    fi
+    # Filters: if the user picked ALL models, omit filters; otherwise pass
+    # exact model names as filters (the existing parser already handles this).
+    if [[ ${#chosen_models[@]} -lt ${#all_models[@]} ]]; then
+        built_argv+=("${chosen_models[@]}")
+    fi
+
+    _wiz_step "Step 4/4 — Review & confirm"
+    {
+        # Human-readable summary
+        printf '  Models  : %d\n' "${#chosen_models[@]}"
+        printf '  Tests   : %s\n' "$tests_summary"
+        [[ -n "$speed_label"   ]] && printf '  Speed   : %s\n' "$speed_label"
+        [[ -n "$quality_label" ]] && printf '  Quality : %s\n' "$quality_label"
+        printf '\n  \033[1mEquivalent CLI:\033[0m\n'
+        printf '  \033[36m./benchmark-models.sh'
+        local a
+        for a in "${built_argv[@]}"; do
+            if [[ "$a" == *" "* ]]; then printf ' "%s"' "$a"; else printf ' %s' "$a"; fi
+        done
+        printf '\033[0m\n\n'
+    } >&2
+
+    if ! _wiz_confirm "Run this benchmark now?"; then
+        printf '\n  Cancelled.\n' >&2
+        return 1
+    fi
+
+    # Export to global so caller can use `set --`
+    WIZARD_ARGV=("${built_argv[@]}")
+    return 0
+}
+
+# Trigger: only when invoked with no arguments AND we have a real terminal.
+# Setting BENCH_NO_WIZARD=1 disables the wizard entirely.
+if [[ $# -eq 0 ]] && [[ -t 0 ]] && [[ -t 1 ]] && [[ "${BENCH_NO_WIZARD:-0}" != "1" ]]; then
+    if run_wizard; then
+        set -- "${WIZARD_ARGV[@]}"
+    else
+        exit 0
+    fi
+fi
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -188,6 +574,11 @@ while [[ $# -gt 0 ]]; do
             cat <<'HELPEOF'
 Usage: benchmark-models.sh [OPTIONS] [FILTER...]
 
+If invoked with no arguments on an interactive terminal, an interactive
+wizard guides you through model selection and test choice. To skip the
+wizard from a pure-CLI workflow, pass any flag (e.g. --quick) or set
+BENCH_NO_WIZARD=1.
+
 Benchmark your llama-swap models using llama-benchy.
 Results use the standard llama-benchy format for comparison
 with other DGX Spark users on the NVIDIA forums.
@@ -283,6 +674,50 @@ log() { echo -e "$1" | tee -a "$REPORT_FILE"; }
 
 unload_all() {
     curl -sf -X POST "$LLAMA_SWAP_URL/unload" > /dev/null 2>&1 || true
+    # Poll until BOTH (a) llama-swap reports no running upstream AND (b) no
+    # docker model-runner container is still present. llama-swap removes the
+    # container from its /running list as soon as it sends the stop, but
+    # docker takes additional time to actually kill the process and release
+    # GPU memory. Without waiting for docker, the next warmup races the
+    # shutting-down container and llama-swap returns HTTP 502.
+    local waited=0 max_wait=120
+    while (( waited < max_wait )); do
+        local llamaswap_clear=true docker_clear=true
+
+        # (a) llama-swap /running endpoint — empty result means nothing loaded.
+        # We treat HTTP failure (curl exit non-zero) as "still loaded" rather
+        # than "clear" so a transient 502 doesn't trick us into proceeding.
+        local running rc
+        running=$(curl -s --max-time 3 -w '\n%{http_code}' "$LLAMA_SWAP_URL/running" 2>/dev/null) || true
+        local code body
+        code=$(echo "$running" | tail -n1)
+        body=$(echo "$running" | sed '$d')
+        if [[ "$code" == "200" ]]; then
+            if echo "$body" | jq -e '(.running // .) | length == 0' >/dev/null 2>&1; then
+                :
+            else
+                llamaswap_clear=false
+            fi
+        else
+            llamaswap_clear=false
+        fi
+
+        # (b) docker — any container started by llama-swap follows the
+        # naming pattern vllm-*, llamacpp-*, sglang-* or ollama-* (see
+        # llama-swap/config.yaml `docker run --name` lines).
+        if docker ps --format '{{.Names}}' 2>/dev/null \
+            | grep -qE '^(vllm-|llamacpp-|sglang-|ollama-)' ; then
+            docker_clear=false
+        fi
+
+        if $llamaswap_clear && $docker_clear; then
+            break
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+    # Final settle so VRAM the docker daemon just released is visible to the
+    # next process (the kernel needs a moment to reflect freed device memory).
     sleep 5
 }
 
@@ -294,15 +729,32 @@ warmup_model() {
     start=$(date +%s.%N)
 
     local response_file="/tmp/response_${TIMESTAMP}.json"
-    local http_code
-    http_code=$(curl -s -w "%{http_code}" -o "$response_file" --max-time "$TIMEOUT" \
-        -X POST "$LLAMA_SWAP_URL/v1/chat/completions" \
-        -H "Content-Type: application/json" \
-        -d "$(jq -n --arg model "$model" '{
-            model: $model,
-            messages: [{role: "user", content: "Write a short python hello world script."}],
-            max_tokens: 50
-        }')" 2>/dev/null) || http_code=0
+    local http_code attempt=1 max_attempts=2
+    while (( attempt <= max_attempts )); do
+        http_code=$(curl -s -w "%{http_code}" -o "$response_file" --max-time "$TIMEOUT" \
+            -X POST "$LLAMA_SWAP_URL/v1/chat/completions" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg model "$model" '{
+                model: $model,
+                messages: [{role: "user", content: "Write a short python hello world script."}],
+                max_tokens: 50
+            }')" 2>/dev/null) || http_code=0
+
+        # 200 → done. 502 / 0 (no response, gateway down) → transient, retry once
+        # after a longer wait. Any other 4xx / 5xx (e.g. 400 OOM) is not
+        # transient — fail fast with the message.
+        if [[ "$http_code" == "200" ]]; then
+            break
+        fi
+        if (( attempt < max_attempts )) && { [[ "$http_code" == "502" ]] || [[ "$http_code" == "0" ]]; }; then
+            log "  ${YELLOW}HTTP $http_code from llama-swap — likely a still-shutting-down container. Retrying in 30s...${NC}"
+            unload_all     # extra teardown wait before the second attempt
+            sleep 30
+            attempt=$((attempt + 1))
+            continue
+        fi
+        break
+    done
 
     end=$(date +%s.%N)
     elapsed=$(echo "scale=1; $end - $start" | bc)
@@ -310,6 +762,12 @@ warmup_model() {
     if [[ "$http_code" -ne 200 ]]; then
         local err_msg
         err_msg=$(jq -r '.error.message // empty' "$response_file" 2>/dev/null)
+        if [[ -z "$err_msg" ]]; then
+            # Many 502s come back as plain text, not JSON — surface the first
+            # line of the body so the actual cause (e.g. "process exited with
+            # code 1") is visible in the log instead of just "HTTP 502".
+            err_msg=$(head -c 200 "$response_file" 2>/dev/null | tr '\n' ' ' | head -c 200)
+        fi
         if [[ -n "$err_msg" ]]; then
             log "  ${RED}FAILED to load: $err_msg (HTTP $http_code)${NC}"
         else
@@ -585,6 +1043,11 @@ PYEOF
 QUALITY_SCORE=""
 QUALITY_RATING=""
 QUALITY_REPORT=""
+QUALITY_DEPLOY=""             # Deployability subscore
+QUALITY_RESPONSE_MS=""        # median turn latency in seconds
+QUALITY_CTXPRESS=""           # context pressure %
+QUALITY_TOTAL_POINTS=""       # "12 / 12"
+QUALITY_CATS=""               # "Tool Selection 100%, Multi-Step Chains 100%"
 # Helper to look up max_len for a model. Mirrors the values in the RECIPES
 # dict inside generate_recipe_yaml (kept in sync manually — the previous
 # sed-extracts-then-exec approach broke on the first inner '}').
@@ -603,6 +1066,9 @@ get_model_max_len() {
         GPT-OSS-120B)                                                 echo  65536 ;;
         Mistral-Small-24B-Instruct-2501)                              echo  32768 ;;
         Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF)   echo  16384 ;;
+        Qwen3.6-35B-A3B-FP8)                                          echo 262144 ;;
+        Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive)               echo  16384 ;;
+        Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4)                 echo 131072 ;;
         *)                                                            echo "" ;;
     esac
 }
@@ -666,21 +1132,20 @@ run_quality() {
     QUALITY_RATING=$(grep -oE '★+[^[:space:]]*[[:space:]]*[A-Za-z]+' "$out_file" \
         | head -n1 || true)
 
-    if [[ -z "$QUALITY_SCORE" ]]; then
-        # Fall back to newest report.md in QUALITY_DIR
-        local newest_report
-        newest_report=$(find "$QUALITY_DIR" -name 'report.md' -newer "$out_file" 2>/dev/null \
-            | head -n1)
-        [[ -z "$newest_report" ]] && newest_report=$(ls -t "$QUALITY_DIR"/*/report.md 2>/dev/null | head -n1)
-        if [[ -n "$newest_report" && -f "$newest_report" ]]; then
-            QUALITY_REPORT="$newest_report"
-            QUALITY_SCORE=$(grep -oE 'Score[^0-9]*[0-9]+(\.[0-9]+)?' "$newest_report" \
-                | head -n1 | grep -oE '[0-9]+(\.[0-9]+)?' || true)
-            QUALITY_RATING=$(grep -oE '★+[^[:space:]]*[[:space:]]*[A-Za-z]+' "$newest_report" \
-                | head -n1 || true)
-        fi
-    else
-        QUALITY_REPORT=$(ls -t "$QUALITY_DIR"/*/report.md 2>/dev/null | head -n1)
+    # Locate the report markdown file. tool-eval-bench writes per-run reports
+    # named <ISO-timestamp>_<runid>.md (NOT report.md) two subdirectories deep
+    # ($QUALITY_DIR/YYYY/MM/<file>.md), so we have to find by mtime.
+    local newest_report
+    newest_report=$(find "$QUALITY_DIR" -type f -name '*.md' -printf '%T@ %p\n' 2>/dev/null \
+        | sort -rn | head -n1 | awk '{print $2}')
+    if [[ -z "$QUALITY_SCORE" && -n "$newest_report" && -f "$newest_report" ]]; then
+        QUALITY_REPORT="$newest_report"
+        QUALITY_SCORE=$(grep -oE 'Score[^0-9]*[0-9]+(\.[0-9]+)?' "$newest_report" \
+            | head -n1 | grep -oE '[0-9]+(\.[0-9]+)?' || true)
+        QUALITY_RATING=$(grep -oE '★+[^[:space:]]*[[:space:]]*[A-Za-z]+' "$newest_report" \
+            | head -n1 || true)
+    elif [[ -n "$newest_report" ]]; then
+        QUALITY_REPORT="$newest_report"
     fi
 
     # Echo the tool-eval-bench summary block (last 25 lines of stdout) to BOTH
@@ -690,8 +1155,40 @@ run_quality() {
     tail -25 "$out_file" | tee -a "$REPORT_FILE"
     rm -f "$out_file"
 
+    # Parse extra subscores from report.md (Deployability, Responsiveness,
+    # Context Pressure, Total Points, Category Scores) so the final summary
+    # can show a tool-eval-bench detail block.
+    QUALITY_DEPLOY=""; QUALITY_RESPONSE_MS=""; QUALITY_CTXPRESS=""
+    QUALITY_TOTAL_POINTS=""; QUALITY_CATS=""
+    if [[ -n "$QUALITY_REPORT" && -f "$QUALITY_REPORT" ]]; then
+        QUALITY_DEPLOY=$(grep -m1 -oE '\*\*Deployability\*\*:[[:space:]]*\*\*[0-9]+(\.[0-9]+)?\*\*' "$QUALITY_REPORT" \
+            | grep -oE '[0-9]+(\.[0-9]+)?' | tail -n1 || true)
+        QUALITY_RESPONSE_MS=$(grep -m1 -oE 'median turn:[[:space:]]*[0-9]+(\.[0-9]+)?s' "$QUALITY_REPORT" \
+            | grep -oE '[0-9]+(\.[0-9]+)?' || true)
+        QUALITY_CTXPRESS=$(grep -m1 -oE '\*\*Context Pressure\*\*:[[:space:]]*[0-9]+%' "$QUALITY_REPORT" \
+            | grep -oE '[0-9]+' || true)
+        QUALITY_TOTAL_POINTS=$(grep -m1 -oE '\*\*Total Points\*\*:[[:space:]]*[0-9]+[[:space:]]*/[[:space:]]*[0-9]+' "$QUALITY_REPORT" \
+            | sed 's/.*Points\*\*:[[:space:]]*//' || true)
+        # Category Scores table: rows look like "| Tool Selection | 6 | 6 | 100% |"
+        # Pull category-name + percent and join into one inline string.
+        QUALITY_CATS=$(awk '
+            /^## Category Scores/ {in_cat=1; next}
+            in_cat && /^## / {in_cat=0}
+            in_cat && /^\| *[A-Za-z]/ && !/^\| *Category/ && !/^\| *---/ {
+                # extract first and last cells
+                gsub(/^\| */, ""); gsub(/ *\| *$/, "")
+                n = split($0, c, / *\| */)
+                if (n >= 4) printf "%s%s %s", (sep?", ":""), c[1], c[n]
+                sep=1
+            }
+        ' "$QUALITY_REPORT")
+    fi
+
     if [[ -n "$QUALITY_SCORE" ]]; then
         log "  ${CYAN}Quality score:${NC} ${BOLD}${QUALITY_SCORE}/100${NC} ${QUALITY_RATING}"
+        [[ -n "$QUALITY_TOTAL_POINTS" ]] && log "  ${DIM}Points: $QUALITY_TOTAL_POINTS${NC}"
+        [[ -n "$QUALITY_DEPLOY" ]] && log "  ${DIM}Deployability: ${QUALITY_DEPLOY}/100  |  Median turn: ${QUALITY_RESPONSE_MS:-?}s  |  Context pressure: ${QUALITY_CTXPRESS:-?}%${NC}"
+        [[ -n "$QUALITY_CATS" ]] && log "  ${DIM}Categories: $QUALITY_CATS${NC}"
         [[ -n "$QUALITY_REPORT" ]] && log "  ${DIM}Quality report: $QUALITY_REPORT${NC}"
     else
         log "  ${YELLOW}Quality score could not be parsed from tool-eval-bench output${NC}"
@@ -1283,7 +1780,8 @@ PYEOF
 log ""
 log "${BOLD}============================================================${NC}"
 log "${BOLD}  DGX Spark Model Benchmark${NC}"
-log "${BOLD}  powered by llama-benchy (github.com/eugr/llama-benchy)${NC}"
+log "${BOLD}  powered by llama-benchy     (github.com/eugr/llama-benchy)${NC}"
+log "${BOLD}  powered by tool-eval-bench  (github.com/SeraphimSerapis/tool-eval-bench)${NC}"
 log "${BOLD}============================================================${NC}"
 log ""
 log "  Endpoint : $LLAMA_SWAP_URL"
@@ -1397,6 +1895,7 @@ TOTAL_START=$(date +%s.%N)
 
 # Collect results for final summary
 declare -A SUMMARY_PP SUMMARY_TG SUMMARY_PEAK SUMMARY_TTFT SUMMARY_STATUS SUMMARY_DEGRADATION SUMMARY_QUALITY SUMMARY_LOAD
+declare -A SUMMARY_QUALITY_DEPLOY SUMMARY_QUALITY_RESPONSE SUMMARY_QUALITY_CTXPRESS SUMMARY_QUALITY_POINTS SUMMARY_QUALITY_CATS SUMMARY_QUALITY_REPORT SUMMARY_QUALITY_RATING
 
 for MODEL in $MODELS; do
     IDX=$((IDX + 1))
@@ -1515,6 +2014,16 @@ for MODEL in $MODELS; do
                 SUMMARY_QUALITY[$MODEL]="?"
                 [[ "$QUALITY_ONLY" == true ]] && SUMMARY_STATUS[$MODEL]="FAIL" && FAIL=$((FAIL + 1)) && checkpoint_model_done "$MODEL" "FAIL"
             fi
+            # Persist tool-eval-bench detail subscores for the final-report
+            # quality table. Defaults to "—" so the table renders cleanly even
+            # when a field couldn't be parsed.
+            SUMMARY_QUALITY_DEPLOY[$MODEL]="${QUALITY_DEPLOY:-—}"
+            SUMMARY_QUALITY_RESPONSE[$MODEL]="${QUALITY_RESPONSE_MS:-—}"
+            SUMMARY_QUALITY_CTXPRESS[$MODEL]="${QUALITY_CTXPRESS:-—}"
+            SUMMARY_QUALITY_POINTS[$MODEL]="${QUALITY_TOTAL_POINTS:-—}"
+            SUMMARY_QUALITY_CATS[$MODEL]="${QUALITY_CATS:-—}"
+            SUMMARY_QUALITY_REPORT[$MODEL]="${QUALITY_REPORT:-}"
+            SUMMARY_QUALITY_RATING[$MODEL]="${QUALITY_RATING:-—}"
         fi
     else
         FAIL=$((FAIL + 1))
@@ -1597,15 +2106,75 @@ log ""
 log "  ${DIM}---------------------------------------------------------------${NC}"
 log "  ${DIM}How to read this table:${NC}"
 log "  ${DIM}${NC}"
+log "  ${DIM}  Load         = Cold-load time (model load + first token reply).${NC}"
 log "  ${DIM}  Read (pp)    = How fast the model reads your prompt (higher = better).${NC}"
 log "  ${DIM}  Write (tg)   = How fast the model types its answer at depth=0 baseline.${NC}"
 log "  ${DIM}                  This is the speed you feel when chatting.${NC}"
 log "  ${DIM}                  Humans read at ~4 tok/s, so 20+ feels smooth.${NC}"
 log "  ${DIM}  Peak         = Fastest burst speed observed in a 1-second window.${NC}"
-log "  ${DIM}  TTFT         = Time until the first word appears (lower = better).${NC}"
 log "  ${DIM}  Deep ctx     = Speed change at max tested depth vs baseline.${NC}"
 log "  ${DIM}                  >-15% = unified memory bandwidth bottleneck.${NC}"
+log "  ${DIM}  Quality      = tool-eval-bench overall score (0-100).${NC}"
 log "  ${DIM}---------------------------------------------------------------${NC}"
+
+# Tool-eval-bench detail block — only emitted when --quality (or --quality-only)
+# was used and we have at least one parsed score. Shows the per-model
+# subscores and category breakdown that the github page promises but the
+# main table can't fit.
+if [[ "$QUALITY" == true ]]; then
+    log ""
+    log "${BOLD}============================================================${NC}"
+    log "${BOLD}  TOOL-EVAL-BENCH — quality detail${NC}"
+    log "${BOLD}  github.com/SeraphimSerapis/tool-eval-bench${NC}"
+    log "${BOLD}============================================================${NC}"
+    log ""
+    log "  ${BOLD}$(printf '%-42s  %7s  %7s  %8s  %10s  %8s  %s' 'Model' 'Score' 'Deploy' 'Median' 'CtxPress' 'Points' 'Rating')${NC}"
+    log "  ${DIM}$(printf '%-42s  %7s  %7s  %8s  %10s  %8s  %s' '' '/100' '/100' 'turn (s)' '%' 'earned' '')${NC}"
+    log "  $(printf '%.0s-' {1..120})"
+
+    for MODEL in $MODELS; do
+        local_name="$MODEL"
+        [[ ${#local_name} -gt 42 ]] && local_name="${local_name:0:39}..."
+        # Skip rows where the model didn't run quality at all
+        if [[ -z "${SUMMARY_QUALITY[$MODEL]:-}" || "${SUMMARY_QUALITY[$MODEL]}" == "—" ]]; then
+            continue
+        fi
+        printf -v line "  %-42s  %7s  %7s  %8s  %10s  %8s  %s" \
+            "$local_name" \
+            "${SUMMARY_QUALITY[$MODEL]:-—}" \
+            "${SUMMARY_QUALITY_DEPLOY[$MODEL]:-—}" \
+            "${SUMMARY_QUALITY_RESPONSE[$MODEL]:-—}" \
+            "${SUMMARY_QUALITY_CTXPRESS[$MODEL]:-—}" \
+            "${SUMMARY_QUALITY_POINTS[$MODEL]:-—}" \
+            "${SUMMARY_QUALITY_RATING[$MODEL]:-—}"
+        log "$line"
+    done
+
+    log ""
+    # Per-model category breakdown — one line per model, only when we parsed it.
+    have_cats=false
+    for MODEL in $MODELS; do
+        [[ -n "${SUMMARY_QUALITY_CATS[$MODEL]:-}" && "${SUMMARY_QUALITY_CATS[$MODEL]}" != "—" ]] && have_cats=true
+    done
+    if [[ "$have_cats" == true ]]; then
+        log "  ${BOLD}Category scores per model:${NC}"
+        for MODEL in $MODELS; do
+            cats="${SUMMARY_QUALITY_CATS[$MODEL]:-}"
+            [[ -z "$cats" || "$cats" == "—" ]] && continue
+            log "  ${DIM}- ${MODEL}:${NC} $cats"
+        done
+        log ""
+    fi
+
+    log "  ${DIM}Field guide:${NC}"
+    log "  ${DIM}  Score      = headline tool-call accuracy (earned / max points × 100).${NC}"
+    log "  ${DIM}  Deploy     = Deployability subscore — combined fitness for production use.${NC}"
+    log "  ${DIM}  Median turn= median seconds per assistant turn (lower = snappier).${NC}"
+    log "  ${DIM}  CtxPress   = % of context window pre-filled before the test prompt.${NC}"
+    log "  ${DIM}  Points     = raw points earned vs max for the chosen scenarios.${NC}"
+    log "  ${DIM}  Rating     = star rating from tool-eval-bench (Excellent / Good / Fair / Poor).${NC}"
+    log "  ${DIM}---------------------------------------------------------------${NC}"
+fi
 log ""
 log "  Results saved to:"
 log "    Report     : $REPORT_FILE"
