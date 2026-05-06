@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # 1. vLLM (Primary Speed Engine) - Port 18000
   vllm:
-    image: ghcr.io/${GH_USER}/vllm-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/vllm-spark:latest
     container_name: vllm
     restart: unless-stopped
     ipc: host
@@ -21,7 +21,7 @@ services:
 
   # 2. LLAMA-SERVER (GGUF Engine) - Port 19000
   llama-server:
-    image: ghcr.io/${GH_USER}/llama-cpp-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
     container_name: llama-cpp
     ports: ["19000:19000"]
     ulimits: { memlock: -1, stack: 67108864 }
@@ -38,7 +38,7 @@ services:
   # LiteLLM reaches it via Docker DNS: http://llama-swap:8080
   # Model containers join its network namespace: --network container:llama-swap → localhost:8080
   llama-swap:
-    image: ghcr.io/${GH_USER}/llama-swap-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-swap-spark:latest
     container_name: llama-swap
     ports:
       - "28080:8080"
@@ -50,7 +50,7 @@ services:
 
   # 4. OLLAMA - Port 11434
   ollama:
-    image: ghcr.io/${GH_USER}/ollama-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/ollama-spark:latest
     container_name: ollama
     ports: ["11434:11434"]
     volumes:
@@ -59,7 +59,7 @@ services:
 
   # 5. LITELLM GATEWAY - Port 14000
   litellm:
-    image: ghcr.io/${GH_USER}/litellm-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:latest
     container_name: litellm
     network_mode: host
     depends_on: [litellm-db]

@@ -6,12 +6,19 @@ version: '3.8'
 # SETUP INSTRUCTIONS:
 # 1. Copy this file to `docker-compose.yml`
 # 2. Run `setup/setup.sh` (or hand-create a `.env`) so the following are set:
-#      GH_USER             — your GitHub username (for ghcr.io image pulls)
+#      GH_USER             — image-registry user (also docker-login user, default ghcr.io)
 #      LLM_ROOT_PATH       — host path that holds the model files
 #      REPO_CONFIG_PATH    — absolute path to this repo on the host
 #      DATABASE_URL        — postgres URL for LiteLLM (e.g. postgresql://litellm_admin:PW@litellm-db:5432/litellm)
 #      LITELLM_MASTER_KEY  — matches the master_key in LiteLLM/config.yaml
 #      POSTGRES_PASSWORD   — Postgres password for the LiteLLM DB
+#
+#    Optional, for non-ghcr.io registries (GitLab, Harbor, Nexus, …):
+#      REGISTRY            — defaults to "ghcr.io"
+#      IMAGE_NAMESPACE     — path under the registry; defaults to ${GH_USER}.
+#                            For GitLab use "<group>/<project>".
+#    All image references below already expand ${REGISTRY} and
+#    ${IMAGE_NAMESPACE}, so just set them in .env and run as usual.
 # 3. `docker network create dgx_net`  (if you didn't already)
 # 4. `docker compose up -d`
 # ==============================================================================
@@ -20,7 +27,7 @@ version: '3.8'
 services:
   # 1. vLLM (Primary Speed Engine) - Port 18000
   vllm:
-    image: ghcr.io/${GH_USER}/vllm-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/vllm-spark:latest
     container_name: vllm
     restart: unless-stopped
     ipc: host
@@ -38,7 +45,7 @@ services:
 
   # 2. LLAMA-SERVER (GGUF Engine) - Port 19000
   llama-server:
-    image: ghcr.io/${GH_USER}/llama-cpp-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
     container_name: llama-cpp
     ports: ["19000:19000"]
     ulimits: { memlock: -1, stack: 67108864 }
@@ -55,7 +62,7 @@ services:
   # LiteLLM reaches it via Docker DNS: http://llama-swap:8080
   # Model containers join its network namespace: --network container:llama-swap → localhost:8080
   llama-swap:
-    image: ghcr.io/${GH_USER}/llama-swap-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-swap-spark:latest
     container_name: llama-swap
     ports:
       - "28080:8080"
@@ -67,7 +74,7 @@ services:
 
   # 4. OLLAMA - Port 11434
   ollama:
-    image: ghcr.io/${GH_USER}/ollama-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/ollama-spark:latest
     container_name: ollama
     ports: ["11434:11434"]
     volumes:
@@ -76,7 +83,7 @@ services:
 
   # 5. LITELLM GATEWAY - Port 14000
   litellm:
-    image: ghcr.io/${GH_USER}/litellm-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:latest
     container_name: litellm
     network_mode: host
     depends_on: [litellm-db]
