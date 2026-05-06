@@ -8,7 +8,6 @@ set -e
 # where the user cloned the repo (do not assume ~/Docker/...).
 # Allow REPO_ROOT to be overridden via env if needed.
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-REGISTRY="ghcr.io"
 
 # 1. Load variables from .env if it exists
 if [ -f "$REPO_ROOT/.env" ]; then
@@ -19,35 +18,55 @@ else
     exit 1
 fi
 
-# Ensure mandatory variables are present
-if [ -z "$GH_USER" ] || [ -z "$GH_PAT" ]; then
-    echo "❌ Error: GH_USER or GH_PAT not found in .env"
+# --- Registry / namespace (override in .env or via env vars) -----------------
+# REGISTRY         where to push (e.g. ghcr.io, registry.gitlab.com,
+#                  registry.example.com:5000). Default: ghcr.io
+# IMAGE_NAMESPACE  path under the registry that prefixes every image name.
+#                  For ghcr.io this is your GitHub username/org. For GitLab
+#                  it is "<group>/<project>". Defaults to $GH_USER (back-compat).
+# REGISTRY_USER /  credentials used for `docker login`. Default to GH_USER /
+# REGISTRY_TOKEN   GH_PAT so existing ghcr.io setups keep working unchanged.
+REGISTRY="${REGISTRY:-ghcr.io}"
+IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-${GH_USER:-}}"
+REGISTRY_USER="${REGISTRY_USER:-${GH_USER:-}}"
+REGISTRY_TOKEN="${REGISTRY_TOKEN:-${GH_PAT:-}}"
+
+if [ -z "$IMAGE_NAMESPACE" ]; then
+    echo "❌ Error: IMAGE_NAMESPACE (or GH_USER) not set in .env"
+    exit 1
+fi
+if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_TOKEN" ]; then
+    echo "❌ Error: REGISTRY_USER/REGISTRY_TOKEN (or GH_USER/GH_PAT) not set in .env"
     exit 1
 fi
 
 echo "🚀 Starting Spark GB10 Unified Build Process..."
+echo "   Registry  : $REGISTRY"
+echo "   Namespace : $IMAGE_NAMESPACE"
 
 # Move to project root
 cd "$REPO_ROOT"
 
 # 2. Automated Login (No prompt)
-echo "🔑 Logging into GitHub Container Registry..."
-echo "$GH_PAT" | docker login $REGISTRY -u "$GH_USER" --password-stdin
+echo "🔑 Logging into container registry: $REGISTRY"
+echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
 
 # 3. Build and Push Function
 build_and_push() {
     local folder=$1
     local dockerfile=$2
     local image_name=$3
-    
+
+    local tag="$REGISTRY/$IMAGE_NAMESPACE/$image_name:latest"
+
     echo "---------------------------------------------------------"
-    echo "🛠️  Building: $image_name"
+    echo "🛠️  Building: $tag"
     echo "---------------------------------------------------------"
-    
-    docker build -t "$REGISTRY/$GH_USER/$image_name:latest" -f "$folder/$dockerfile" "$folder"
-    
-    echo "📦 Pushing: $image_name"
-    docker push "$REGISTRY/$GH_USER/$image_name:latest"
+
+    docker build -t "$tag" -f "$folder/$dockerfile" "$folder"
+
+    echo "📦 Pushing: $tag"
+    docker push "$tag"
 }
 
 # --- EXECUTE BUILDS ---
@@ -67,4 +86,4 @@ build_and_push "./ollama" "ollama.Dockerfile" "ollama-spark"
 # 5. LITELLM
 build_and_push "./LiteLLM" "litellm.Dockerfile" "litellm-spark"
 
-echo "✅ All Spark-optimized images have been pushed to GHCR!"
+echo "✅ All Spark-optimized images have been pushed to $REGISTRY!"

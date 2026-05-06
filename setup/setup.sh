@@ -330,9 +330,13 @@ print_header "Step 9: Model Repository Credentials"
 print_info "HuggingFace token is needed to download models from private or rate-limited repos."
 HF_TOKEN=$(ask_input "HuggingFace User Access Token (or leave blank to skip)" "")
 
-print_info "GitHub PAT is needed to push Docker images to GHCR (optional)."
-GH_USER=$(ask_input "GitHub username (or leave blank to skip GHCR)" "")
-GH_PAT=$(ask_input "GitHub Personal Access Token with 'write:packages' scope (or leave blank)" "")
+print_info "Container registry credentials (used to push the stack images)."
+print_info "Default is GitHub Container Registry (ghcr.io). For GitLab/Harbor/Nexus,"
+print_info "set REGISTRY and IMAGE_NAMESPACE accordingly."
+REGISTRY=$(ask_input "Container registry hostname" "ghcr.io")
+GH_USER=$(ask_input "Registry username (e.g. GitHub user, GitLab user, robot account)" "")
+IMAGE_NAMESPACE=$(ask_input "Image namespace (path under the registry; for ghcr.io = your user; for GitLab = group/project)" "${GH_USER}")
+GH_PAT=$(ask_input "Registry token / password (e.g. GitHub PAT with 'write:packages', GitLab deploy token, …)" "")
 
 ###############################################################################
 # 10. MODEL SELECTION
@@ -377,10 +381,15 @@ REPO_CONFIG_PATH=$REPO_CONFIG_PATH
 # Network
 DOCKER_NETWORK=$NETWORK_NAME
 
-# Credentials
+# Credentials & registry
 GH_USER=${GH_USER:-}
 GH_PAT=${GH_PAT:-}
 HF_TOKEN=${HF_TOKEN:-}
+
+# Container registry — override these to push/pull from a non-ghcr.io registry
+# (GitLab, Harbor, Nexus, …). docker-compose.yml expands them.
+REGISTRY=${REGISTRY:-ghcr.io}
+IMAGE_NAMESPACE=${IMAGE_NAMESPACE:-${GH_USER:-}}
 
 # Ports
 LITELLM_PORT=${LITELLM_PORT:-4000}
