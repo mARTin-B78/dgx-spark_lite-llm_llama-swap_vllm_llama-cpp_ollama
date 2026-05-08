@@ -66,8 +66,11 @@ llama-swap groups models into tiers so concurrent loading is safe on 128 GB unif
 
 - NVIDIA DGX Spark (GB10) running Ubuntu 24.04
 - Docker with NVIDIA Container Toolkit (`nvidia-ctk`)
-- A GitHub Container Registry account (GHCR) to host your images
-- GitHub Personal Access Token (PAT) with `write:packages` scope
+- A container registry to host your images — **any** OCI-compatible registry works:
+  - GitHub Container Registry (`ghcr.io`) — default
+  - GitLab Container Registry (`registry.gitlab.com/<group>/<project>`)
+  - Harbor, Nexus, AWS ECR, or any self-hosted registry
+- A registry token/PAT with push permissions (`write:packages` for GHCR)
 
 ---
 
@@ -523,113 +526,42 @@ vLLM's startup check fails (`free_memory < gpu_memory_utilization × total`) whe
 
 ## Step 10 — docker-compose.yml
 
-Copy the sample and replace all `YOUR_USER` / `YOUR_*` placeholders:
+Copy the sample:
 
 ```bash
 cp docker-compose.yml.sample docker-compose.yml
 ```
 
-Sanitized reference:
+All image references expand `${REGISTRY}` and `${IMAGE_NAMESPACE}` from `.env`, so no manual editing is needed — just make sure `setup.sh` (or your `.env`) has those values set. Example snippet:
 
 ```yaml
-version: '3.8'
-
 services:
   vllm:
-    image: ghcr.io/YOUR_GH_USER/vllm-spark:latest
-    container_name: vllm
-    restart: unless-stopped
-    ipc: host
-    ports: ["18000:8000"]
-    volumes:
-      - /home/YOUR_USER/LLMs/safetensors:/model
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
-    command: >
-      --model /model/Qwen3.5-7B-Instruct --host 0.0.0.0 --port 8000
-    networks: [dgx_net]
-
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/vllm-spark:latest
   llama-server:
-    image: ghcr.io/YOUR_GH_USER/llama-cpp-spark:latest
-    container_name: llama-cpp
-    ports: ["19000:19000"]
-    ulimits: { memlock: -1, stack: 67108864 }
-    volumes:
-      - /home/YOUR_USER/LLMs/llama:/models
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
-    command: --host 0.0.0.0 --port 19000 --models-dir /models --n-gpu-layers 99
-    networks: [dgx_net]
-
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
   llama-swap:
-    image: ghcr.io/YOUR_GH_USER/llama-swap-spark:latest
-    container_name: llama-swap
-    restart: unless-stopped
-    ports: ["28080:8080"]
-    entrypoint: ["/usr/bin/llama-swap", "-config", "/app/config.yaml", "-listen", "0.0.0.0:8080"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    volumes:
-      - /home/YOUR_USER/Docker/REPO_DIR/llama-swap:/app
-      - /var/run/docker.sock:/var/run/docker.sock
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-    networks: [dgx_net]
-
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-swap-spark:latest
   ollama:
-    image: ghcr.io/YOUR_GH_USER/ollama-spark:latest
-    container_name: ollama
-    ports: ["11434:11434"]
-    volumes:
-      - /home/YOUR_USER/LLMs/ollama:/root/.ollama
-    networks: [dgx_net]
-
-  litellm-db:
-    image: postgres:15-alpine
-    container_name: litellm-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: litellm
-      POSTGRES_USER: litellm_admin
-      POSTGRES_PASSWORD: YOUR_DB_PASSWORD
-    ports: ["15432:5432"]
-    volumes:
-      - litellm_db_data:/var/lib/postgresql/data
-    networks: [dgx_net]
-
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/ollama-spark:latest
   litellm:
-    image: ghcr.io/YOUR_GH_USER/litellm-spark:latest
-    container_name: litellm
-    restart: unless-stopped
-    depends_on: [litellm-db]
-    ports: ["14000:4000"]
-    environment:
-      - DATABASE_URL=postgresql://litellm_admin:YOUR_DB_PASSWORD@litellm-db:5432/litellm
-      - LITELLM_MASTER_KEY=YOUR_MASTER_KEY
-    volumes:
-      - /home/YOUR_USER/Docker/REPO_DIR/LiteLLM/config.yaml:/app/config.yaml
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-    networks: [dgx_net]
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:latest
+```
 
-networks:
-  dgx_net:
-    external: true
+For non-ghcr.io registries, add to `.env`:
 
-volumes:
-  litellm_db_data:
+```env
+REGISTRY=registry.gitlab.com
+IMAGE_NAMESPACE=mygroup/myproject
+REGISTRY_USER=myuser
+REGISTRY_TOKEN=mytoken
+```
+
+Then run the helper to rewrite the inline image strings inside `llama-swap/config.yaml` (the only place env-var expansion doesn't reach automatically):
+
+```bash
+./setup/rewrite-registry.sh            # applies changes
+./setup/rewrite-registry.sh --dry-run  # preview first
 ```
 
 ---
