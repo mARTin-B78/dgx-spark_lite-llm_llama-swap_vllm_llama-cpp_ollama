@@ -84,6 +84,38 @@ macros:
 #      - Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 # solo: gpu_mem 0.80 (102 GB) — NVFP4 Optimized version
 
 models:
+# ==============================================================================
+# IMAGE NAMES — TWO SEPARATE IMAGE FAMILIES
+# ==============================================================================
+# This config references two distinct families of Docker images:
+#
+# 1. STACK IMAGES  (built by build_and_push.sh, pulled via docker-compose.yml)
+#    ghcr.io/<namespace>/llama-cpp-spark:latest
+#    ghcr.io/<namespace>/vllm-spark:latest   ← persistent, always-on service
+#    ghcr.io/<namespace>/llama-swap-spark:latest
+#    ghcr.io/<namespace>/ollama-spark:latest
+#    ghcr.io/<namespace>/litellm-spark:latest
+#    These run as long-lived Docker Compose services.
+#
+# 2. EPHEMERAL vLLM IMAGES  (built from vllm/build/spark-vllm-docker submodule)
+#    vllm-node:latest / vllm-node:Version_1      ← standard vLLM (most models)
+#    vllm-node-tf5:latest                         ← transformers v5 (Mamba/hybrid)
+#    vllm-node-mxfp4:latest                       ← CUTLASS MXFP4 (GPT-OSS-120B)
+#    spark-vllm:Version_1                         ← legacy tag, same builder
+#    vllm/vllm-openai:v0.20.0-aarch64-cu130-*    ← upstream NVIDIA image (Docker Hub)
+#    llama-swap spawns these on demand via `docker run` and evicts them when idle.
+#
+# To build the ephemeral vLLM images (one-time, ~20–60 min):
+#   git submodule update --init --recursive
+#   cd vllm/build/spark-vllm-docker
+#   ./build-and-copy.sh           # → vllm-node:latest
+#   ./build-and-copy.sh --tf5     # → vllm-node-tf5:latest
+#   ./build-and-copy.sh --exp-mxfp4  # → vllm-node-mxfp4:latest
+#
+# spark-vllm:Version_1 is an older tag from the same builder.
+# Retag if needed: docker tag vllm-node:latest spark-vllm:Version_1
+# ==============================================================================
+
 # --- llama.cpp GGUF Model ---
   # Best for specific GGUF quants not handled well by vLLM
   # These use the paths from your models.ini but are managed by llama-swap
