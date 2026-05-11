@@ -174,9 +174,9 @@ models:
       ghcr.io/martin-b78/llama-cpp-spark:latest
       -m /models/vllm/Alibaba/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ2_M.gguf
       --port ${PORT} --host ${host}
-      --ctx-size 16384 --n-gpu-layers 99 --parallel 4 --no-mmap
+      --ctx-size 65536 --n-gpu-layers 99 --parallel 4 --no-mmap
       --jinja
-      --chat-template-file /models/vllm/Alibaba/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive/chat_template-tool-strict.jinja
+      --chat-template-file /models/vllm/Alibaba/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive/chat_template-tool-strict-nothink.jinja
     cmdStop: "docker stop llamacpp-qwen-${PORT}"
 
 
