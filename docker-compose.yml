@@ -1,84 +1,206 @@
 version: '3.8'
-
+#llama-cpp_ollama_llama-swap_lite-llm docker-compose.yaml as portainer stack
 services:
-  # 1. vLLM (Primary Speed Engine) - Port 18000
-  vllm:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/vllm-spark:latest
-    container_name: vllm
-    restart: unless-stopped
-    ipc: host
-    ports:
-      - "18000:8000"
-    volumes:
-      - ${LLM_ROOT_PATH}/safetensors:/model
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
-    command: >
-      --model /model/Qwen3.5-7B-Instruct --host 0.0.0.0 --port 8000
-    networks: [dgx_net]
 
-  # 2. LLAMA-SERVER (GGUF Engine) - Port 19000
-  llama-server:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
-    container_name: llama-cpp
-    ports: ["19000:19000"]
-    ulimits: { memlock: -1, stack: 67108864 }
-    volumes:
-      - ${LLM_ROOT_PATH}/llama:/models
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
-    command: --host 0.0.0.0 --port 19000 --models-dir /models --n-gpu-layers 99
-    networks: [dgx_net]
-
-  # 3. LLAMA-SWAP (VRAM Orchestrator) - Port 28080 (host) → 8080 (container)
-  # LiteLLM reaches it via Docker DNS: http://llama-swap:8080
-  # Model containers join its network namespace: --network container:llama-swap → localhost:8080
-  llama-swap:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-swap-spark:latest
-    container_name: llama-swap
-    ports:
-      - "28080:8080"
-    volumes:
-      - /home/sparky/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/llama-swap:/app
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - dgx_net
-
-  # 4. OLLAMA - Port 11434
-  ollama:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/ollama-spark:latest
-    container_name: ollama
-    ports: ["11434:11434"]
-    volumes:
-      - ${LLM_ROOT_PATH}/ollama:/root/.ollama
-    networks: [dgx_net]
-
-  # 5. LITELLM GATEWAY - Port 14000
+  # ==========================================
+  # 1a. LITELLM (The API Gateway)
+  # ==========================================
   litellm:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:latest
     container_name: litellm
-    network_mode: host
-    depends_on: [litellm-db]
+    restart: unless-stopped
+    depends_on:
+      - litellm-db
+
+    ports:
+      - "14000:4000" # Map external 14000 to internal 4000 to avoid DGX NoMachine conflict
+
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - DATABASE_URL=${DATABASE_URL}        # postgresql://litellm_admin:PW@litellm-db:5432/litellm
+    # - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}  # Intentionally disabled — open API, UI-only auth
+      - UI_PASSWORD=${LITELLM_UI_PASSWORD}
+      - UI_USERNAME=${LITELLM_UI_USERNAME}
+
     volumes:
       - ${REPO_CONFIG_PATH}/LiteLLM/config.yaml:/app/config.yaml
-    command: ["--config", "/app/config.yaml", "--port", "14000"]
 
-  # 6. LITELLM DATABASE - Port 15432
+    command:
+      - "--config"
+      - "/app/config.yaml"
+      - "--port"
+      - "4000" # Keep this at 4000 internally
+
+    networks:
+      - dgx_net
+
+
+  # ==========================================
+  # 1b. LITELLM DATABASE (PostgreSQL)
+  # ==========================================
   litellm-db:
     image: postgres:15-alpine
     container_name: litellm-postgres
+    restart: unless-stopped
     environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm_admin
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports: ["15432:5432"]
-    networks: [dgx_net]
+    ports:
+      - "15432:5432"
+    volumes:
+      - litellm_db_data:/var/lib/postgresql/data
+    networks:
+      - dgx_net
 
+  # ==========================================
+  # 2. LLAMA-SWAP (The VRAM Manager)
+  # ==========================================
+  llama-swap:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-swap-spark:latest
+    container_name: llama-swap
+    restart: unless-stopped
+
+    ports:
+      - "28080:8080"
+
+    entrypoint: ["/usr/bin/llama-swap", "-config", "/app/config.yaml", "-listen", "0.0.0.0:8080"]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    volumes:
+      - ${REPO_CONFIG_PATH}/llama-swap:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    # - /usr/bin/docker:/usr/bin/docker
+      - ${LLM_ROOT_PATH}:/models
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+
+    networks:
+      - dgx_net
+
+  # ==========================================
+  # 3. LLAMA.CPP (The GGUF Engine)
+  # ==========================================
+  llama-server:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
+    container_name: llama.cpp
+    restart: unless-stopped
+
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+    ipc: host
+    security_opt:
+      - seccomp:unconfined
+
+    ports:
+      - "18080:18080"
+
+    volumes:
+      - ${LLM_ROOT_PATH}/ollama:/models/ollama
+      # Mount individual GGUF files if you only want specific models:
+      # - ${LLM_ROOT_PATH}/ollama/YourModel/model-Q4_K_M.gguf:/models/model-Q4_K_M.gguf
+      # Multi-file GGUF shards:
+      # - ${LLM_ROOT_PATH}/ollama/BigModel/model-Q4_K_M-00001-of-00002.gguf:/models/model-00001-of-00002.gguf
+      # - ${LLM_ROOT_PATH}/ollama/BigModel/model-Q4_K_M-00002-of-00002.gguf:/models/model-00002-of-00002.gguf
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+      - GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+
+    command:
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "18080"
+      - --parallel
+      - "4"
+      - --no-mmap
+      - --context-shift
+      - --models-dir
+      - /models
+      - --chat-template
+      - chatml
+      - --n-gpu-layers
+      - "99"
+      - --models-max
+      - "1"
+      - --ctx-size
+      - "16384"
+      - --timeout
+      - "600"
+
+    stdin_open: true
+    tty: true
+
+    networks:
+      - dgx_net
+
+  # ==========================================
+  # 4. OLLAMA (The General Model Manager)
+  # ==========================================
+  ollama:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/ollama-spark:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ${LLM_ROOT_PATH}/ollama:/root/.ollama
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_NUM_PARALLEL=1
+      - OLLAMA_LLM_LIBRARY=cuda_v13
+      - OLLAMA_DEBUG=1
+
+    entrypoint: ["/bin/sh", "-c", "sleep 15 && ollama serve"]
+
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    networks:
+      - dgx_net
+
+# ==========================================
+# GLOBAL NETWORKS & VOLUMES
+# ==========================================
 networks:
   dgx_net:
     external: true
