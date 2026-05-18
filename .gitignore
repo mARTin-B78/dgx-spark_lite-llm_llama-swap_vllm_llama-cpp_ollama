@@ -27,3 +27,5 @@ setup/SETUP_SUMMARY.txt
 .DS_Store
 *klappt nicht so ganz*
 *.gemini.created
+# VSCode / IDE temp files with control-character names:
+$'\001'*
