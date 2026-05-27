@@ -29,3 +29,4 @@ setup/SETUP_SUMMARY.txt
 *.gemini.created
 # VSCode / IDE temp files with control-character names:
 $'\001'*
+STACK_ERKLÄRUNG.md

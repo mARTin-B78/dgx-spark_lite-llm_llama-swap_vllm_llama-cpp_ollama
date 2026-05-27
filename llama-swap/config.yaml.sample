@@ -98,10 +98,9 @@ models:
 #    These run as long-lived Docker Compose services.
 #
 # 2. EPHEMERAL vLLM IMAGES  (built from vllm/build/spark-vllm-docker submodule)
-#    vllm-node:latest / vllm-node:Version_1      ← standard vLLM (most models)
+#    vllm-node:latest                             ← standard vLLM (most models)
 #    vllm-node-tf5:latest                         ← transformers v5 (Mamba/hybrid)
 #    vllm-node-mxfp4:latest                       ← CUTLASS MXFP4 (GPT-OSS-120B)
-#    spark-vllm:Version_1                         ← legacy tag, same builder
 #    vllm/vllm-openai:v0.20.0-aarch64-cu130-*    ← upstream NVIDIA image (Docker Hub)
 #    llama-swap spawns these on demand via `docker run` and evicts them when idle.
 #
@@ -111,9 +110,6 @@ models:
 #   ./build-and-copy.sh           # → vllm-node:latest
 #   ./build-and-copy.sh --tf5     # → vllm-node-tf5:latest
 #   ./build-and-copy.sh --exp-mxfp4  # → vllm-node-mxfp4:latest
-#
-# spark-vllm:Version_1 is an older tag from the same builder.
-# Retag if needed: docker tag vllm-node:latest spark-vllm:Version_1
 # ==============================================================================
 
 # --- llama.cpp GGUF Model ---
@@ -287,12 +283,12 @@ models:
       MODEL_PATH=/models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
       MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
       CONTAINER_NAME=vllm-qwen3.6-35b-${PORT}
-      IMAGE=vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404
+      IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=262144 MAX_NUM_SEQS=20 KV_DTYPE_BYTES=1
       GMEM_OVERRIDE=0.7069
       GMEM_MIN=0.55 GMEM_MAX=0.71 SAFETY_GIB=4
-      VLLM_SERVE_PREFIX=""
+
       EXTRA_DOCKER_ARGS='-e CUDA_MANAGED_FORCE_DEVICE_ALLOC=1 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3.6-35B-A3B-FP8 qwen3.6-35b-a3b
@@ -329,7 +325,7 @@ models:
       MODEL_PATH=/models/vllm/Alibaba/Qwen3-VL-30B-A3B-Instruct-FP8
       MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3-VL-30B-A3B-Instruct-FP8
       CONTAINER_NAME=vllm-qwen3-vl-${PORT}
-      IMAGE=spark-vllm:Version_1
+      IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=32768 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
       GMEM_MIN=0.40 GMEM_MAX=0.65 SAFETY_GIB=4
@@ -359,7 +355,7 @@ models:
       MODEL_PATH=/models/vllm/Alibaba/Qwen3-Omni-30B-A3B-Instruct
       MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3-Omni-30B-A3B-Instruct
       CONTAINER_NAME=vllm-qwen3-omni-${PORT}
-      IMAGE=vllm-node:Version_1
+      IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=32768 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=2
       GMEM_MIN=0.60 GMEM_MAX=0.75 SAFETY_GIB=6
@@ -482,7 +478,7 @@ models:
       MODEL_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-4B-FP8
       MODEL_HOST_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-4B-FP8
       CONTAINER_NAME=vllm-nano4b-${PORT}
-      IMAGE=spark-vllm:Version_1
+      IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=8192 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
       GMEM_MIN=0.10 GMEM_MAX=0.40 SAFETY_GIB=2
@@ -509,7 +505,7 @@ models:
       MODEL_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
       MODEL_HOST_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
       CONTAINER_NAME=vllm-nemotron-${PORT}
-      IMAGE=spark-vllm:Version_1
+      IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=262144 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
       GMEM_MIN=0.40 GMEM_MAX=0.70 SAFETY_GIB=4
@@ -580,11 +576,11 @@ models:
       MODEL_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
       MODEL_HOST_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
       CONTAINER_NAME=vllm-nano-omni-nvfp4-${PORT}
-      IMAGE=vllm/vllm-openai:v0.20.0-aarch64-cu130-ubuntu2404
+      IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=131072 MAX_NUM_SEQS=8 KV_DTYPE_BYTES=1
       GMEM_MIN=0.65 GMEM_MAX=0.85 SAFETY_GIB=8
-      VLLM_SERVE_PREFIX=""
+
       EXTRA_DOCKER_ARGS='-e VLLM_NVFP4_GEMM_BACKEND=marlin -e VLLM_USE_FLASHINFER_MOE_FP4=0 -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -e CUDA_MANAGED_FORCE_DEVICE_ALLOC=1 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 nemotron-3-nano-omni-nvfp4
@@ -616,7 +612,7 @@ models:
       MODEL_PATH=/models/vllm/Nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
       MODEL_HOST_PATH=/models/vllm/Nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
       CONTAINER_NAME=vllm-nemotron-super-${PORT}
-      IMAGE=spark-vllm:Version_1
+      IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=131072 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
       GMEM_MIN=0.65 GMEM_MAX=0.85 SAFETY_GIB=6
@@ -682,7 +678,7 @@ models:
  #     --runtime nvidia --gpus all --ipc=host --network container:llama-swap
  #     -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
  #     -v <LLM_ROOT_PATH>/vllm:/models/vllm 
- #     vllm-node:Version_1
+ #     vllm-node:latest
  #     vllm serve /models/vllm/Mistral/Mistral-Small-24B-Instruct-2501
  #     --served-model-name Mistral-Small-24B-Instruct-2501
  #     --host ${host} --port ${PORT}
@@ -707,7 +703,7 @@ models:
 #      -e PYTORCH_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 #      -v <LLM_ROOT_PATH>/vllm:/models/vllm 
 #      -v <HOME>/.cache/huggingface:/root/.cache/huggingface
-#      vllm-node:Version_1
+#      vllm-node:latest
 #      vllm serve /models/vllm/MiniMax/Minimax-M2.5-BF16-INT4-AWQ
 #      --served-model-name Minimax-M2.5-BF16-INT4-AWQ
 #      --host ${host} --port ${PORT}
@@ -748,7 +744,7 @@ models:
 #      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
 #      -v <LLM_ROOT_PATH>/vllm:/models/vllm 
 #      -v <HOME>/.cache/huggingface:/root/.cache/huggingface
-#      vllm-node:Version_1
+#      vllm-node:latest
 #      vllm serve /models/vllm/MiniMax/MiniMax-M2.5-REAP-172B-A10B-NVFP4-GB10
 #      --served-model-name Minimax-M2.5-BF16-INT4-AWQ
 #      --host ${host} --port ${PORT}
