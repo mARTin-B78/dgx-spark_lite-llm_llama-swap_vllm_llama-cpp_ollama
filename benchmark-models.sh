@@ -1388,7 +1388,7 @@ RECIPES = {
     "Qwen3.5-35B-A3B-FP8": {
         "hf_model":    "Qwen/Qwen3.5-35B-A3B-Instruct",
         "description": "Qwen3.5 35B MoE FP8-dynamic — reasoning + tool use with MTP-2 speculation",
-        "container":   "vllm-node:Version_1",
+        "container":   "vllm-node:latest",
         "tp": 1, "gpu_mem": 0.7, "max_len": 131072,
         "env": {
             "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
@@ -1427,7 +1427,7 @@ RECIPES = {
     "Qwen3-VL-30B-A3B-Instruct-FP8": {
         "hf_model":    "Qwen/Qwen3-VL-30B-A3B-Instruct",
         "description": "Qwen3-VL 30B MoE FP8 — vision-language model",
-        "container":   "spark-vllm:Version_1",
+        "container":   "vllm-node:latest",
         "tp": 1, "gpu_mem": 0.60, "max_len": 32768,
         "env": {},
         "extras": [
@@ -1443,7 +1443,7 @@ RECIPES = {
     "Qwen3-Omni-30B-A3B-Instruct": {
         "hf_model":    "Qwen/Qwen3-Omni-30B-A3B-Instruct",
         "description": "Qwen3-Omni 30B MoE — audio + vision + text multimodal",
-        "container":   "vllm-node:Version_1",
+        "container":   "vllm-node:latest",
         "tp": 1, "gpu_mem": 0.75, "max_len": 32768,
         "env": {},
         "extras": [
@@ -1495,7 +1495,7 @@ RECIPES = {
     "Nemotron-3-Nano-4B-FP8": {
         "hf_model":    "nvidia/Nemotron-3-Nano-4B-Instruct",
         "description": "Nemotron-3-Nano 4B FP8 — ultra-fast orchestrator / routing model",
-        "container":   "spark-vllm:Version_1",
+        "container":   "vllm-node:latest",
         "tp": 1, "gpu_mem": 0.5, "max_len": 8192,
         "env": {},
         "extras": [
@@ -1512,7 +1512,7 @@ RECIPES = {
     "Nemotron-3-Nano-30B-A3B-NVFP4": {
         "hf_model":    "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4",
         "description": "Nemotron-3-Nano 30B NVFP4 — Blackwell-native MoE with nano_v3 reasoning",
-        "container":   "vllm-node:Version_1",
+        "container":   "vllm-node:latest",
         "tp": 1, "gpu_mem": 0.65, "max_len": 131072,
         "env": {
             "VLLM_USE_FLASHINFER_MOE_FP4": "1",
@@ -1531,7 +1531,7 @@ RECIPES = {
     "Nemotron-3-Super-120B-A12B-NVFP4": {
         "hf_model":    "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
         "description": "Nemotron-3-Super 120B NVFP4 — large reasoning model with CUTLASS MoE",
-        "container":   "spark-vllm:Version_1",
+        "container":   "vllm-node:latest",
         "tp": 1, "gpu_mem": 0.7, "max_len": 65536,
         "env": {
             "VLLM_FLASHINFER_ALLREDUCE_BACKEND": "trtllm",
@@ -1568,7 +1568,7 @@ RECIPES = {
     "Mistral-Small-24B-Instruct-2501": {
         "hf_model":    "mistralai/Mistral-Small-24B-Instruct-2501",
         "description": "Mistral Small 24B — fast roleplay and instruction following",
-        "container":   "vllm-node:Version_1",
+        "container":   "vllm-node:latest",
         "tp": 1, "gpu_mem": 0.7, "max_len": 32768,
         "env": {},
         "extras": [

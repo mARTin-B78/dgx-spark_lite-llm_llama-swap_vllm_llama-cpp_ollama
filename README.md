@@ -166,13 +166,13 @@ cd vllm/build/spark-vllm-docker
 
 ---
 
-**Step 4 — Build `vllm-node` (standard vLLM)
+**Step 4 — Build `vllm-node` (standard vLLM)**
 
 Used for: Qwen3.5-35B-FP8, Mistral-Small-24B, Nemotron-4B-FP8, Nemotron-30B-NVFP4, GPT-OSS-120B, Qwen3-VL, Qwen3-Omni.
 
 ```bash
 ./build-and-copy.sh
-# Image tag defaults to: vllm-node
+# Outputs: vllm-node:latest (matches llama-swap/config.yaml defaults perfectly, no manual retagging needed)
 ```
 
 ---
@@ -515,10 +515,10 @@ vLLM's startup check fails (`free_memory < gpu_memory_utilization × total`) whe
 
 | Env | Default | Purpose |
 |---|---|---|
-| `IMAGE` | required | Docker image (e.g. `vllm-node-tf5:latest`, `vllm/vllm-openai:...`). |
+| `IMAGE` | required | Docker image (e.g. `vllm-node:latest`, `vllm-node-tf5:latest`). |
 | `EXTRA_DOCKER_ARGS` | empty | Extra `docker run` args (mounts, envs). Example: `'-e VLLM_USE_FLASHINFER_MOE_FP8=1 -v /host/mod:/mod:ro'`. |
 | `PRE_LAUNCH_CMD` | empty | Bash command run inside the container before `vllm serve`. Used for image patches (`bash run.sh`) or env setup. When set, the launcher uses `--entrypoint /bin/bash -c "PRE_LAUNCH_CMD && exec vllm serve …"`. |
-| `VLLM_SERVE_PREFIX` | `vllm serve` | Set to `""` (empty) for images whose ENTRYPOINT is already `vllm serve` (e.g. `vllm/vllm-openai`), so the model path and flags pass directly as entrypoint args. |
+| `VLLM_SERVE_PREFIX` | `vllm serve` | Set to `""` (empty) for images whose ENTRYPOINT is already `vllm serve`, so the model path and flags pass directly as entrypoint args. |
 
 **A second launcher** — [llama-swap/scripts/launch-qwen35-122b.sh](llama-swap/scripts/launch-qwen35-122b.sh) — exists for historical reasons (uses `nvidia-smi` instead of `/proc/meminfo`). The generic launcher above can replace it; pick whichever you prefer.
 
