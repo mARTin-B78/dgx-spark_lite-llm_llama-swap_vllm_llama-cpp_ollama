@@ -12,6 +12,7 @@ openclaw/
 vllm/build/
 test-results/
 FORUM_UPDATE.md
+probe-models.sh
 
 # --- Setup Output (auto-generated, not tracked) ---
 setup/SETUP_SUMMARY.txt

@@ -54,9 +54,9 @@ llama-swap groups models into tiers so concurrent loading is safe on 128 GB unif
 
 | Tier | gpu_mem | VRAM each | Max concurrent | Examples |
 |---|---|---|---|---|
-| **S** Small | 0.12–0.22 | 15–28 GB | 4× | Nemotron-4B-FP8, Qwen3.5-35B-GGUF |
-| **M** Medium | 0.40 | ~51 GB | 2× | Qwen3.5-35B-FP8, Mistral-Small-24B |
-| **L** Large | 0.70–0.85 | ~90–109 GB | 1× (solo) | Qwen3.5-122B, Nemotron-120B, GPT-OSS-120B |
+| **S** Small | 0.12–0.25 | 15–32 GB | 4× | Nemotron-4B-FP8, Qwen3.5-35B-GGUF, Qwen3.6-27B-heretic-GGUF |
+| **M** Medium | 0.40–0.50 | 51–64 GB | 2× | Qwen3.5-35B-FP8, Qwen3.6-27B-PrismaSCOUT-NVFP4 |
+| **L** Large | 0.65–0.85 | ~83–109 GB | 1× (solo) | Qwen3.6-35B-FP8, Qwen3.5-122B, Nemotron-120B, GPT-OSS-120B |
 
 `exclusive: true` on the L-tier means loading any large model automatically evicts all others.
 
@@ -330,53 +330,6 @@ For the full narrative walkthrough with benchmark numbers and deeper explanation
 
 ---
 
-## Model tier system
-
-llama-swap groups models into tiers so concurrent loading is safe on 128 GB unified memory (~108 GB available after OS):
-
-| Tier | gpu_mem | VRAM each | Max concurrent | Examples |
-|---|---|---|---|---|
-| **S** Small | 0.12–0.22 | 15–28 GB | 4× | Nemotron-4B-FP8, Qwen3.5-35B-GGUF |
-| **M** Medium | 0.40 | ~51 GB | 2× | Qwen3.5-35B-FP8, Mistral-Small-24B |
-| **L** Large | 0.70–0.85 | ~90–109 GB | 1× (solo) | Qwen3.5-122B, Nemotron-120B, GPT-OSS-120B |
-
-`exclusive: true` on the L-tier means loading any large model automatically evicts all others.
-
----
-
-## Stack architecture reference
-
-```
-Client (Claude Code / Open WebUI / curl)
-        │
-        ▼  :14000 (OpenAI-compatible)
-  ┌─────────────┐
-  │   LiteLLM   │  ◄── unified gateway, auth, routing
-  └──────┬──────┘
-         │ routes by model name
-         ▼ :28080
-  ┌─────────────┐
-  │ llama-swap  │  ◄── VRAM orchestrator (docker.sock)
-  └──────┬──────┘
-         │ spawns on demand
-    ┌────┼──────────────────────┐
-    ▼    ▼                      ▼
- vllm  llama.cpp             Ollama
- :PORT :PORT                 :11434
-(ephemeral model containers)
-```
-
-| Service | Host port | Role |
-|---|---|---|
-| LiteLLM | 14000 | API gateway |
-| llama-swap | 28080 | VRAM orchestrator |
-| Ollama | 11434 | GGUF / Ollama models |
-| llama.cpp (persistent) | 19000 | GGUF engine |
-| vLLM (persistent) | 18000 | Safetensors engine |
-| LiteLLM DB (Postgres) | 15432 | LiteLLM backend |
-
----
-
 ## Troubleshooting
 
 ### Setup script won't run
@@ -438,20 +391,6 @@ sudo systemctl restart docker
 3. **Start the stack:** `docker compose up -d`
 
 4. **Verify:** `curl http://localhost:14000/v1/models -H "Authorization: Bearer YOUR_KEY"`
-
----
-
-## What is this?
-
-A production-ready Docker Compose stack that lets a single DGX Spark run **multiple large language models** without manual VRAM juggling. `llama-swap` acts as the orchestrator: it spins up the right inference container on demand and evicts it when idle, so 128 GB is never wasted on a model nobody is using.
-
-A unified **LiteLLM** gateway exposes every model through one OpenAI-compatible endpoint with a single API key — no per-service port juggling.
-
----
-
-## Stack overview
-
-See [LiteLLM/config.yaml.sample](LiteLLM/config.yaml.sample) for the complete annotated config.
 
 ---
 
@@ -626,6 +565,9 @@ Ray's GCS server adds ~500 MB overhead and its 95% OOM monitor kills the worker 
 
 **`--load-format fastsafetensors` cuts startup time ~40%**
 Requires `model.safetensors.index.json` alongside the weight files. All HuggingFace multi-shard models include it. Avoid for models that load >85% of available RAM — fastsafetensors uses multi-threaded direct I/O which can cause OOM on unified memory if the model is very close to the limit.
+
+**Blank line in a `cmd: >` block causes silent OOM on hybrid models (Qwen3.6-27B)**
+YAML folded block scalar (`>`) preserves blank lines as literal `\n`. A shell running the resulting command treats that newline as a statement separator: the `env VAR=val …` prefix becomes a no-op (env without a trailing command just prints the environment), and none of `MAX_MODEL_LEN` / `MAX_NUM_SEQS` / `GMEM_MAX` reach the launch script. For hybrid Qwen3.6 models this is fatal: vLLM auto-detects `max_model_len=262144` from `config.json` instead of the intended 65536, allocates 81 GiB KV cache, and crashes the system. **Never put a blank line between env-var assignments and the script call inside a `>` block.**
 
 **llama-swap shows "unhealthy" for a model that's loading**
 Large models (122B+) need `readyTimeout: 1800` or more. The default 60 s is far too short for a 90 GB weight load.
