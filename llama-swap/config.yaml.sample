@@ -176,6 +176,33 @@ models:
     cmdStop: "docker stop llamacpp-qwen-${PORT}"
 
 
+  # --- Qwen3.6-27B Uncensored Heretic v2 (NVFP4-MLP GGUF, llama.cpp) ---
+  # Abliterated via Heretic MPOA v2 — all 15 MTP tensors preserved.
+  # MMLU: 85.67% (vs 86.65% original — minimal quality loss).
+  # 28 GiB on disk (BF16 attention + NVFP4 MLP-only). Fits comfortably in 128 GiB.
+  # --no-mmap omitted: forced the full file into heap upfront, causing RAM spikes.
+  # --parallel 2 (not 4): halves KV cache (~17 GiB → ~8.5 GiB at 65K ctx).
+  # ⚠️  Update -m path to the exact GGUF filename after download.
+  Qwen3.6-27B-uncensored-heretic-NVFP4:
+    ttl: 600
+    readyTimeout: 300
+    checkEndpoint: "/health"
+    cmd: >
+      docker run --rm --name llamacpp-qwen27b-${PORT}
+      --runtime nvidia --gpus all --ipc host --network container:llama-swap
+      --ulimit memlock=-1 --ulimit stack=67108864
+      --security-opt seccomp=unconfined
+      -v <LLM_ROOT_PATH>/ollama:/models/ollama
+      ghcr.io/<IMAGE_NAMESPACE>/llama-cpp-spark:latest
+      -m /models/ollama/Alibaba/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-NVFP4-GGUF/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-NVFP4-MLP-Only.gguf
+      --alias Qwen3.6-27B-uncensored-heretic-NVFP4
+      --port ${PORT} --host ${host}
+      --ctx-size 65536 --n-gpu-layers 99 --parallel 2
+      --jinja
+      --reasoning-budget 1024
+    cmdStop: "docker stop llamacpp-qwen27b-${PORT}"
+
+
 #  Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-BF16:
 #    ttl: 600
 #    readyTimeout: 300
@@ -288,8 +315,7 @@ models:
       MAX_MODEL_LEN=262144 MAX_NUM_SEQS=20 KV_DTYPE_BYTES=1
       GMEM_OVERRIDE=0.7069
       GMEM_MIN=0.55 GMEM_MAX=0.71 SAFETY_GIB=4
-
-      EXTRA_DOCKER_ARGS='-e CUDA_MANAGED_FORCE_DEVICE_ALLOC=1 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
+      EXTRA_DOCKER_ARGS='-e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3.6-35B-A3B-FP8 qwen3.6-35b-a3b
       --chat-template /models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8/chat_template-tool-strict.jinja
@@ -303,6 +329,53 @@ models:
       --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
       --trust-remote-code
     cmdStop: "docker stop vllm-qwen3.6-35b-${PORT}"
+
+  # --- Qwen3.6-27B PrismaSCOUT (Blackwell NVFP4+BF16 mixed, compressed-tensors) ---
+  # ~20 GiB weights, GSM8K 96.66%, MTP speculative decoding k=1.
+  # Architecture: 64 hybrid layers (16 full GDN attention @ full_attention_interval=4
+  # + 48 linear/Mamba layers). KV cache only for the 16 attention layers.
+  #
+  # ⚠️  YAML blank-line gotcha: a blank line inside a `>` folded block scalar
+  # becomes a literal \n. When the shell receives the split command, the first
+  # `env VAR=val ...` line runs as a no-op (env without a command just prints
+  # the environment) and none of MAX_MODEL_LEN / MAX_NUM_SEQS / GMEM_* reach
+  # the launch script. vLLM then auto-detects max_model_len=262144 from
+  # config.json → 81 GiB KV cache → OOM crash. All env vars must be on
+  # consecutive non-blank lines. Fixed here.
+  #
+  # CUDA_MANAGED_FORCE_DEVICE_ALLOC=1 removed: unsafe on GB10 unified memory.
+  # MTP tokens 3→1: spec-decode + PIECEWISE CUDA graphs triggered a
+  # −11.67 GiB estimate overflow in vLLM 0.21.1rc1; k=1 avoids that path.
+  Qwen3.6-27B-PrismaSCOUT-NVFP4:
+    ttl: 600
+    readyTimeout: 600
+    checkEndpoint: "/health"
+    cmd: >
+      env
+      MODEL_PATH=/models/vllm/Alibaba/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm
+      MODEL_HOST_PATH=<LLM_ROOT_PATH>/vllm/Alibaba/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm
+      CONTAINER_NAME=vllm-qwen3.6-27b-${PORT}
+      IMAGE=vllm-node:latest
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=65536 MAX_NUM_SEQS=4 KV_DTYPE_BYTES=1
+      GMEM_MIN=0.45 GMEM_MAX=0.65 SAFETY_GIB=4
+      EXTRA_DOCKER_ARGS='-e NVIDIA_FORWARD_COMPAT=1 -e VLLM_MARLIN_USE_ATOMIC_ADD=1 -e FLASHINFER_DISABLE_VERSION_CHECK=1 -e TORCH_MATMUL_PRECISION=high -e VLLM_TEST_FORCE_FP8_MARLIN=1 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
+      /app/scripts/launch-vllm-auto.sh
+      --served-model-name Qwen3.6-27B-PrismaSCOUT-NVFP4 qwen3.6-27b
+      --chat-template /models/vllm/Alibaba/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm/chat_template-tool-strict.jinja
+      --language-model-only
+      --max-num-batched-tokens 32768
+      --quantization compressed-tensors
+      --kv-cache-dtype fp8
+      --load-format fastsafetensors
+      --enable-prefix-caching
+      --enable-chunked-prefill
+      --trust-remote-code
+      --reasoning-parser qwen3
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
+    cmdStop: "docker stop vllm-qwen3.6-27b-${PORT}"
 
   # --- forum-tuned: mamba float16 + large batches + FP8 KV cache ---
   # Uses a launcher script that queries free VRAM at launch time and sets
@@ -580,7 +653,6 @@ models:
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=131072 MAX_NUM_SEQS=8 KV_DTYPE_BYTES=1
       GMEM_MIN=0.65 GMEM_MAX=0.85 SAFETY_GIB=8
-
       EXTRA_DOCKER_ARGS='-e VLLM_NVFP4_GEMM_BACKEND=marlin -e VLLM_USE_FLASHINFER_MOE_FP4=0 -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -e CUDA_MANAGED_FORCE_DEVICE_ALLOC=1 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 nemotron-3-nano-omni-nvfp4

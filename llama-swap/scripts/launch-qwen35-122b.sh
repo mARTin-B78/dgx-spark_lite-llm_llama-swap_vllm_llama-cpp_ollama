@@ -11,10 +11,10 @@ PORT="${1}"
 HOST="${2}"
 
 # ── Memory query ──────────────────────────────────────────────────────────────
-# Run nvidia-smi inside the (cached) vllm-node-tf5 image.
+# Run nvidia-smi inside the (cached) vllm-node image.
 # Adds ~3s overhead — negligible vs. the several minutes this model takes to load.
 MEM_LINE=$(docker run --rm --runtime nvidia --gpus all \
-    vllm-node-tf5:latest \
+    vllm-node:latest \
     sh -c "nvidia-smi --query-gpu=memory.free,memory.total --format=csv,noheaders,nounits | head -1" \
     2>/dev/null || true)
 
@@ -57,8 +57,8 @@ exec docker run --rm --name "vllm-qwen3.5-122b-${PORT}" \
     --runtime nvidia --gpus all --ipc=host --network container:llama-swap \
     -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1 \
     -e VLLM_MARLIN_USE_ATOMIC_ADD=1 \
-    -v /home/sparky/LLMs/vllm:/models/vllm \
-    vllm-node-tf5:latest \
+    -v "${LLM_ROOT_PATH:-/home/user/LLMs}/vllm:/models/vllm" \
+    vllm-node:latest \
     vllm serve /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound \
     --served-model-name Qwen3.5-122B-A10B-int4-AutoRound \
     --chat-template /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound/chat_template-tool-strict.jinja \
@@ -72,7 +72,6 @@ exec docker run --rm --name "vllm-qwen3.5-122b-${PORT}" \
     --load-format fastsafetensors \
     --trust-remote-code \
     --attention-backend FLASHINFER \
-    --mamba-ssm-cache-dtype float16 \
     --enable-prefix-caching \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \

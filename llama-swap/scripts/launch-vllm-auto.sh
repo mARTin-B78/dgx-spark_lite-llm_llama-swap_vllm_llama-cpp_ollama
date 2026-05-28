@@ -250,7 +250,7 @@ DOCKER_BASE=(
     --runtime nvidia --gpus all --ipc=host --network container:llama-swap
     -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
     -e VLLM_MARLIN_USE_ATOMIC_ADD=1
-    -v /home/sparky/LLMs/vllm:/models/vllm
+    -v "${LLM_ROOT_PATH:-/home/user/LLMs}/vllm:/models/vllm"
 )
 
 # Optional: extra mounts / envs (split on whitespace; preserves order).
