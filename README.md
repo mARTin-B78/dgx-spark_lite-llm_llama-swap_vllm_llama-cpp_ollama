@@ -522,27 +522,124 @@ docker logs -f llama-swap
 
 ## Step 12 — Benchmark
 
-> **Credits**
-> - **[@eugr](https://github.com/eugr) — [llama-benchy](https://github.com/eugr/llama-benchy)** — standardized throughput benchmark (pp/tg/TTFT). Output format is designed for direct copy-paste into forum posts for cross-system comparison.
-> - **[@SeraphimSerapis](https://github.com/SeraphimSerapis) — [tool-eval-bench](https://github.com/SeraphimSerapis/tool-eval-bench)** — 69-scenario tool-calling quality benchmark. Optional via `--quality`. See the [forum announcement](https://forums.developer.nvidia.com/t/introducing-tool-eval-bench-cli/366903).
+`benchmark-models.sh` wraps two complementary tools and runs them back-to-back against every model in your llama-swap instance — loading each model once and running both passes before unloading:
 
-Speed only (default):
+- **[llama-benchy](https://github.com/eugr/llama-benchy)** ([@eugr](https://github.com/eugr)) — standardized throughput benchmark (pp/tg/TTFT). Output is a markdown table designed for direct copy-paste into NVIDIA forum posts for cross-system comparison.
+- **[tool-eval-bench](https://github.com/SeraphimSerapis/tool-eval-bench)** ([@SeraphimSerapis](https://github.com/SeraphimSerapis)) — 69-scenario tool-calling quality benchmark. Optional, via `--quality`. See the [forum announcement](https://forums.developer.nvidia.com/t/introducing-tool-eval-bench-cli/366903).
 
-```bash
-pip install llama-benchy           # or: uvx llama-benchy
-bash benchmark-models.sh           # default = "Medium Log" profile
-```
-
-Speed + tool-calling quality, single load per model (load → llama-benchy → tool-eval-bench → unload):
+### Install prerequisites
 
 ```bash
-uv tool install git+https://github.com/SeraphimSerapis/tool-eval-bench.git
-bash benchmark-models.sh --quality                          # 15-scenario short pass (~2-5 min/model)
-bash benchmark-models.sh --quality --quality-mode full      # 69 scenarios (~15-30 min/model)
-bash benchmark-models.sh --quality --quality-categories "K A J"  # only chosen categories
+pip install llama-benchy                                                    # speed benchmark
+uv tool install git+https://github.com/SeraphimSerapis/tool-eval-bench.git  # quality benchmark (optional)
 ```
 
-The summary table grows a `Quality /100` column when `--quality` is on. Per-model markdown reports land in `test-results/quality/<run_id>/report.md`.
+### Interactive wizard (no-args default)
+
+Running the script with no arguments on an interactive terminal launches a guided setup. It fetches the live model list from llama-swap, lets you pick models and tests, choose a speed profile and quality mode, then shows the equivalent CLI command before running:
+
+```bash
+bash benchmark-models.sh          # launches the interactive wizard
+```
+
+To skip the wizard and go straight to CLI flags, pass any flag (e.g. `--quick`) or set `BENCH_NO_WIZARD=1`.
+
+### Speed profiles
+
+All profiles use pp=2048, tg=128 (real-world document workload shape). The `depth` values simulate KV-cache pressure as context fills up.
+
+| Flag | Profile name | Depths | Runs | Use case |
+|---|---|---|---|---|
+| *(none)* | Medium Log | 0, 16384 | 3 | Default. ~50-page document. Baseline + one realistic context depth. |
+| `--quick` | Smoke test | 0, 16384 | 1 | Fast sanity check after a config change. |
+| `--stress` | Massive Log | 0, 16384, 32768 | 3 | Doubles context to ~100 pages. Reveals bandwidth bottleneck. |
+| `--extreme` | Extreme Limit | 0, 16384, 32768, 65535 | 3 | ~200-page corpus. Crash/swap detection. |
+| `--full` | Full sweep | 0, 16384, 32768 | 3 | Broad: pp=512+2048, tg=128+256+512. Detailed throughput map. |
+| `--arena` | Spark-Arena | 0–100000 (7 depths) | 3 | Official [spark-arena.com](https://spark-arena.com) leaderboard profile. 4 concurrency levels. |
+
+Examples:
+
+```bash
+bash benchmark-models.sh                          # Medium Log, all models
+bash benchmark-models.sh --stress Qwen3.5 Nemotron  # Stress test, only matching models
+bash benchmark-models.sh --quick                  # Smoke test, 1 run, fast
+bash benchmark-models.sh --runs 5 Qwen3.6-35B    # Custom run count
+```
+
+### What the numbers mean
+
+| Metric | What it measures | DGX Spark typical range |
+|---|---|---|
+| **pp tok/s** | Prompt Processing — how fast the model reads your input | 500–5000+ tok/s |
+| **tg tok/s** | Token Generation — how fast the model writes its reply (what you "feel") | 15–60+ tok/s |
+| **TTFT** | Time To First Token — delay before streaming starts | 100–2000 ms |
+
+**The key insight for DGX Spark:** compare `tg tok/s` across depths. A large drop from `depth=16384` to `depth=32768` reveals the unified memory bandwidth bottleneck between the ARM CPU and the Blackwell GPU. The script automatically highlights this with a percentage and `⚠ BANDWIDTH BOTTLENECK DETECTED` if the drop exceeds 15%.
+
+### Quality mode (tool-call accuracy)
+
+`--quality` runs tool-eval-bench right after llama-benchy, on the same loaded model, so no second load is needed. Results land in `test-results/quality/` and are also stored in `data/benchmarks.sqlite` for structured querying.
+
+```bash
+bash benchmark-models.sh --quality                              # short: 15 core scenarios (~2-5 min/model)
+bash benchmark-models.sh --quality --quality-mode full          # full: 69 scenarios (~15-30 min/model)
+bash benchmark-models.sh --quality --quality-mode hardmode      # full + 5 adversarial scenarios
+bash benchmark-models.sh --quality-only                         # skip speed, only measure quality
+bash benchmark-models.sh --quality --quality-categories "K A J" # restrict to specific categories (A-P)
+```
+
+The summary table at the end of a run includes a `Quality /100` column with a star rating. Per-model markdown reports land in `test-results/quality/<YYYY>/<MM>/<run_id>.md`.
+
+#### `data/benchmarks.sqlite`
+
+tool-eval-bench writes every completed run to a local SQLite database at `data/benchmarks.sqlite`. The schema is:
+
+```
+scenario_runs (run_id, created_at, status, model, config_json, scores_json, metadata_json)
+```
+
+You can query it directly to compare models over time:
+
+```bash
+sqlite3 data/benchmarks.sqlite \
+  "SELECT model, json_extract(scores_json,'$.score'), json_extract(scores_json,'$.rating')
+   FROM scenario_runs WHERE status='completed' ORDER BY created_at DESC;"
+```
+
+The database is committed to the repo so benchmark history is tracked in git alongside config changes.
+
+### Spark Arena leaderboard submission
+
+`--arena` uses the official [spark-arena.com](https://spark-arena.com) benchmark profile (7 depths × 4 concurrency levels). Results and recipe files are saved to `test-results/arena-submission/<timestamp>/<model>/`. If the result is a new personal best, the script offers to submit via `spark-arena-cli` (auto-installed to `~/.local/bin` on first run):
+
+```bash
+bash benchmark-models.sh --arena                  # run arena profile, all models
+spark-arena-cli login                              # authenticate (Google / GitHub)
+spark-arena-cli benchmark test-results/arena-submission/<timestamp>/<model>/recipe.yaml
+```
+
+### Crash resume
+
+If a long benchmark run is interrupted, `--resume` picks up from the last completed model:
+
+```bash
+bash benchmark-models.sh --stress --resume        # skip models already finished in last session
+```
+
+Checkpoint files are stored in `test-results/checkpoints/`.
+
+### Results layout
+
+```
+test-results/
+  benchmarks/            # llama-benchy — JSON + Markdown per model per run
+  quality/               # tool-eval-bench — per-run markdown reports
+  arena-submission/      # arena CSV + recipe.yaml (--arena mode)
+  arena-best-results.json  # personal bests for leaderboard tracking
+  checkpoints/           # crash-resume state
+data/
+  benchmarks.sqlite      # structured quality results (tool-eval-bench), queryable with sqlite3
+```
 
 ---
 
