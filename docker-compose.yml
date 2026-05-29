@@ -13,10 +13,10 @@ version: '3.8'
 #                             e.g. postgresql://litellm_admin:PW@litellm-db:5432/litellm
 #      LITELLM_MASTER_KEY   — optional: enforce API key auth; omit for open API / UI-only auth
 #      POSTGRES_PASSWORD    — Postgres password for the LiteLLM DB
-#      POSTGRES_DB          — Postgres database name (default: litellm)
-#      POSTGRES_USER        — Postgres username (default: litellm_admin)
 #      LITELLM_UI_USERNAME  — admin username for the LiteLLM web UI
 #      LITELLM_UI_PASSWORD  — admin password for the LiteLLM web UI
+#      POSTGRES_DB          — Postgres database name (default: litellm)
+#      POSTGRES_USER        — Postgres username (default: litellm_admin)
 #      GITHUB_TOKEN         — PAT for pulling images from ghcr.io (or your private REGISTRY)
 #
 #    NOTE: Docker must be logged into the registry before compose can pull images:
@@ -37,7 +37,31 @@ version: '3.8'
 services:
 
   # ==========================================
-  # 1. LLAMA-SERVER (Persistent GGUF Engine)
+  # 1. VLLM (Primary Safetensors Engine)
+  # ==========================================
+  # NOTE: In practice, vLLM instances are typically managed by llama-swap
+  # (service 3) as ephemeral on-demand containers. Keep this block only if
+  # you want a *persistent* vLLM sidecar running alongside llama-swap.
+  vllm:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/vllm-spark:latest
+    container_name: vllm
+    restart: unless-stopped
+    ipc: host
+    ports:
+      - "19000:8000"  # vLLM internal is always 8000; exposed as 18000
+    volumes:
+      - ${LLM_ROOT_PATH}/safetensors:/model
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+    command: >
+      --model /model/Qwen3.5-7B-Instruct --host 0.0.0.0 --port 8000
+    networks: [dgx_net]
+
+
+  # ==========================================
+  # 2. LLAMA-SERVER (Persistent GGUF Engine)
   # ==========================================
   # Persistent llama.cpp instance for GGUF models; stays loaded between requests.
   # llama-swap can also spin *ephemeral* llama.cpp containers on demand — use
@@ -94,7 +118,7 @@ services:
 
 
   # ==========================================
-  # 2. LLAMA-SWAP (The VRAM Manager)
+  # 3. LLAMA-SWAP (The VRAM Manager)
   # ==========================================
   # Orchestrates all inference containers: spawns them on demand via docker.sock,
   # evicts them when idle so 128 GB unified memory is never wasted.
@@ -133,7 +157,7 @@ services:
 
 
   # ==========================================
-  # 3. OLLAMA (GGUF via Ollama modelfile format)
+  # 4. OLLAMA (GGUF via Ollama modelfile format)
   # ==========================================
   # Handles models pulled or defined via Ollama's modelfile system.
   # The 15-second startup delay gives the GPU driver time to settle
@@ -167,7 +191,7 @@ services:
 
 
   # ==========================================
-  # 4. LITELLM (The Unified API Gateway)
+  # 5. LITELLM (The Unified API Gateway)
   # ==========================================
   # Single OpenAI-compatible endpoint (:14000) in front of all inference services.
   # Internal port is 4000; mapped to 14000 externally to avoid the DGX
@@ -198,7 +222,7 @@ services:
 
 
   # ==========================================
-  # 5. LITELLM DATABASE (PostgreSQL)
+  # 6. LITELLM DATABASE (PostgreSQL)
   # ==========================================
   # Stores LiteLLM's virtual keys, usage logs, and team/budget data.
   # Exposed on 15432 to avoid conflict with any host Postgres on 5432.
