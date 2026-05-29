@@ -4,9 +4,31 @@ version: '3.8'
 # DGX SPARK / GRACE-BLACKWELL OPTIMIZED AI ORCHESTRATION STACK
 #
 # SETUP INSTRUCTIONS:
-# 1. Copy .env.sample to .env and fill in your values
-# 2. Log into your registry once so Docker can pull images:
+# 1. Copy .env.sample to .env and fill in your values (setup/setup.sh does this automatically)
+# 2. Run `setup/setup.sh` (or hand-create a `.env`) so the following are set:
+#      GH_USER              — image-registry user (also docker-login user, default ghcr.io)
+#      LLM_ROOT_PATH        — host path that holds the model files
+#      REPO_CONFIG_PATH     — absolute path to this repo on the host
+#      DATABASE_URL         — postgres URL for LiteLLM
+#                             e.g. postgresql://litellm_admin:PW@litellm-db:5432/litellm
+#      LITELLM_MASTER_KEY   — optional: enforce API key auth; omit for open API / UI-only auth
+#      POSTGRES_PASSWORD    — Postgres password for the LiteLLM DB
+#      POSTGRES_DB          — Postgres database name (default: litellm)
+#      POSTGRES_USER        — Postgres username (default: litellm_admin)
+#      LITELLM_UI_USERNAME  — admin username for the LiteLLM web UI
+#      LITELLM_UI_PASSWORD  — admin password for the LiteLLM web UI
+#      GITHUB_TOKEN         — PAT for pulling images from ghcr.io (or your private REGISTRY)
+#
+#    NOTE: Docker must be logged into the registry before compose can pull images:
 #      echo $GITHUB_TOKEN | docker login ghcr.io -u <GH_USER> --password-stdin
+#    Or add the registry under Portainer → Settings → Registries.
+#
+#    Optional, for non-ghcr.io registries (GitLab, Harbor, Nexus, …):
+#      REGISTRY             — defaults to "ghcr.io"
+#      IMAGE_NAMESPACE      — path under the registry; defaults to ${GH_USER}.
+#                             For GitLab use "<group>/<project>".
+#    All image references below already expand ${REGISTRY} and
+#    ${IMAGE_NAMESPACE}, so just set them in .env and run as usual.
 # 3. `docker network create dgx_net`  (if you didn't already)
 # 4. `docker compose up -d`
 # ==============================================================================
