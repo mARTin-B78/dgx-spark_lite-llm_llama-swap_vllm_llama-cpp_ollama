@@ -15,7 +15,13 @@ version: '3.8'
 #      POSTGRES_PASSWORD    — Postgres password for the LiteLLM DB
 #      LITELLM_UI_USERNAME  — admin username for the LiteLLM web UI
 #      LITELLM_UI_PASSWORD  — admin password for the LiteLLM web UI
+#      POSTGRES_DB          — Postgres database name (default: litellm)
+#      POSTGRES_USER        — Postgres username (default: litellm_admin)
 #      GITHUB_TOKEN         — PAT for pulling images from ghcr.io (or your private REGISTRY)
+#
+#    NOTE: Docker must be logged into the registry before compose can pull images:
+#      echo $GITHUB_TOKEN | docker login ghcr.io -u <GH_USER> --password-stdin
+#    Or add the registry under Portainer → Settings → Registries.
 #
 #    Optional, for non-ghcr.io registries (GitLab, Harbor, Nexus, …):
 #      REGISTRY             — defaults to "ghcr.io"
@@ -146,6 +152,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - GITHUB_TOKEN=${GITHUB_TOKEN}  # PAT for pulling images when spawning model containers
+      - LLM_ROOT_PATH=${LLM_ROOT_PATH}  # Passed to launch scripts for volume mount fallback
     networks: [dgx_net]
 
 
@@ -224,8 +231,8 @@ services:
     container_name: litellm-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: litellm
-      POSTGRES_USER: litellm_admin
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "15432:5432"
