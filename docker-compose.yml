@@ -42,8 +42,8 @@ services:
     container_name: litellm-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: litellm
-      POSTGRES_USER: litellm_admin
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "15432:5432"
