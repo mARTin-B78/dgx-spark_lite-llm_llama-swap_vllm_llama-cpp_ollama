@@ -1,64 +1,156 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-Format: `## [YYYY-MM-DD] — short title` for each entry.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [2026-05-29] — Fix vllm volume mount; adaptive launcher for Qwen3.6-35B
+## [Unreleased]
 
 ### Fixed
-- **`launch-vllm-auto.sh`**: Fixed broken `/models/vllm` volume mount when `LLM_ROOT_PATH` already points to the vllm directory (e.g. `/home/user/LLMs/vllm`). The script was appending `/vllm` to `LLM_ROOT_PATH`, producing a double-`vllm` path (`…/vllm/vllm`) that Docker auto-created as an empty directory — causing all vllm models to see an empty `/models/vllm` mount and fail with "chat template not found". Default fallback value updated to `/home/user/LLMs/vllm` to match the convention.
-- **`config.yaml` — Qwen3.6-35B-A3B-FP8** *(gitignored, not in repo)*:
-  - Removed `GMEM_OVERRIDE=0.7069` — was bypassing adaptive launcher entirely; model now uses dynamic gpu_memory_utilization based on free memory at launch time
-  - Fixed `MODEL_HOST_PATH` from `/models/vllm/Alibaba/…` to `/models/Alibaba/…` so adaptive launcher can read `config.json` inside the llama-swap container (where `LLM_ROOT_PATH` is mounted as `/models`)
-  - Lowered `GMEM_MIN` from `0.55` to `0.40` so adaptive does not error out when TTS services are running and effective free memory is ~54 GiB (u_cap ≈ 0.44)
+- **`launch-vllm-auto.sh`**: Broken `/models/vllm` volume mount when `LLM_ROOT_PATH` already
+  points to the vllm directory (e.g. `/home/user/LLMs/vllm`). Script was appending `/vllm`,
+  producing a double-`vllm` path that Docker auto-created as an empty directory — all vllm
+  models started with an empty `/models/vllm` mount and failed with "chat template not found".
+  Default fallback updated from `/home/user/LLMs` → `/home/user/LLMs/vllm`.
+
+### Changed *(config.yaml — gitignored, applied manually)*
+- **Qwen3.6-35B-A3B-FP8**: Removed `GMEM_OVERRIDE=0.7069`; model now uses adaptive
+  `gpu_memory_utilization` based on free memory at launch time.
+- **Qwen3.6-35B-A3B-FP8**: Fixed `MODEL_HOST_PATH` from `/models/vllm/Alibaba/…` →
+  `/models/Alibaba/…` so the adaptive launcher can read `config.json` inside the llama-swap
+  container (where `LLM_ROOT_PATH` is mounted as `/models`).
+- **Qwen3.6-35B-A3B-FP8**: Lowered `GMEM_MIN` `0.55` → `0.40` so adaptive does not abort
+  when TTS services are running and effective free memory yields u_cap ≈ 0.44.
 
 ---
 
-## [2026-05-29] — docker-compose sync and env cleanup
+## [0.7.0] — 2026-05-29
 
 ### Fixed
-- `docker-compose.yml`: Comment out static vllm service; fix llama-server port to 19000
-- `docker-compose.yml`: Pass `LLM_ROOT_PATH` into llama-swap container environment so launch scripts can construct correct host-side volume paths
-- `.env.sample`: Add missing `REGISTRY` and `IMAGE_NAMESPACE`; make `POSTGRES_DB` and `POSTGRES_USER` configurable
-- `docker-compose.yml.sample`: Sync with live config (secrets scrubbed)
-- Qwen3.6-27B: Resolve OOM crash; add both 27B variants to sample config
+- `docker-compose.yml`: Comment out static vllm sidecar service; fix llama-server port to 19000
+- `docker-compose.yml`: Pass `LLM_ROOT_PATH` into llama-swap container env so launch scripts
+  can build correct host-side volume paths
+- `.env.sample`: Add missing `REGISTRY` and `IMAGE_NAMESPACE` variables
+- `.env.sample`: Make `POSTGRES_DB` and `POSTGRES_USER` configurable (were hardcoded)
+- `docker-compose.yml.sample`: Fully sync structure and comments with live config
+
+### Changed
+- `docker-compose.yml`: Align live compose structure with sample for easier diffing
+
+### Added
+- Qwen3.6-27B-PrismaSCOUT-NVFP4 and Qwen3.6-27B variants to `config.yaml.sample`
 
 ### Docs
-- Benchmark script: Document `benchmark-models.sh` usage in README
-- vllm-node image tags: Standardize across all model blocks; add German non-technical explanation
-- `config.yaml.sample`: Clarify two image families
+- `benchmark-models.sh`: Document usage in README
+- Standardize vllm-node image tags across all model blocks; add German non-technical explanation
 
 ---
 
-## [2026-04-xx] — Adaptive gpu_memory_utilization launcher
+## [0.6.0] — 2026-05-18
 
-### Added
-- **`launch-vllm-auto.sh`**: Generic adaptive `--gpu-memory-utilization` based on `/proc/meminfo` — works on GB10 unified memory where `nvidia-smi` memory queries return "Not Supported"
-- `GMEM_OVERRIDE` knob: Numeric value pins utilization statically; `"adaptive"` / unset computes dynamically
-- 126.5 GB system RAM ceiling to prevent GB10 unified-memory crash near full allocation
-- 5 GiB `u_cap` buffer to bridge `MemAvailable` vs `cudaMemGetInfo` discrepancy at vLLM startup
-- `VLLM_SERVE_PREFIX` for images whose entrypoint is already `vllm serve`
-- Shell-only implementation (awk/sed/grep) — no Python dependency in the minimal llama-swap container
-- `PRE_LAUNCH_CMD` support for in-container patching before `vllm serve`
+### Security
+- Remove hardcoded credentials and absolute paths from `docker-compose.yml`
 
----
+### Fixed
+- Qwen3.6-35B-A3B-Uncensored: Disable thinking mode; expand context to 64K
+- Qwen3.6-27B: Resolve OOM crash at startup
 
-## [2026-04-xx] — Benchmark tooling
-
-### Added
-- **`benchmark-models.sh`**: Interactive wizard, quality detail report, robust unload
-- Tool-eval-bench integration for tool-call quality scoring
-- `--arena` mode, coherence detection, spark-arena-cli integration
-- S/M/L concurrent groups and `--resume`
+### Docs
+- Sync `docker-compose.yml.sample` with live stack configuration (secrets scrubbed)
+- `config.yaml.sample`: Clarify two vllm image families (vllm-node vs vllm/vllm-openai)
+- README: Add private-registry support documentation
 
 ---
 
-## [2026-03-xx] — Initial stack
+## [0.5.0] — 2026-05-06
 
 ### Added
-- Unified DGX Spark / Grace-Blackwell stack: llama-swap + vLLM + llama.cpp + Ollama + LiteLLM
+- Private registry support: `REGISTRY` and `IMAGE_NAMESPACE` env vars for GitLab, Harbor,
+  Nexus, and other non-ghcr.io registries
+- `benchmark-models.sh`: Interactive wizard, quality detail report, robust model unload
+- `benchmark-models.sh`: Tool-eval-bench integration for tool-call quality scoring
+- `benchmark-models.sh`: `--arena` mode, coherence detection, spark-arena-cli integration
+- `benchmark-models.sh`: S/M/L concurrent request groups and `--resume`
+
+### Fixed
+- Issues #6, #7, #8 in setup and build scripts
+
+### Docs
+- Expand launcher reference: `GMEM_OVERRIDE`, system RAM ceiling, environment variable plumbing
+
+---
+
+## [0.4.0] — 2026-05-03
+
+### Added
+- **`launch-vllm-auto.sh`**: `GMEM_OVERRIDE` knob — numeric value pins `gpu_memory_utilization`
+  statically; `"adaptive"` / unset computes dynamically from free memory
+- 126.5 GB system RAM ceiling (`SYSTEM_RAM_CEILING_GIB`) to prevent GB10 unified-memory crash
+  when total system RAM approaches the hardware limit
+- 5 GiB `u_cap` buffer (`GMEM_FREE_BUFFER_GIB`) to bridge `MemAvailable` vs `cudaMemGetInfo`
+  discrepancy at vLLM startup
+- `VLLM_SERVE_PREFIX` env var for images whose entrypoint is already `vllm serve`
+  (e.g. `vllm/vllm-openai`)
+- `PRE_LAUNCH_CMD` env var for in-container patching or setup before `vllm serve`
+
+### Fixed
+- Launcher: Use `/proc/meminfo` instead of `nvidia-smi` for memory queries (GB10 compatibility)
+- Launcher: Shell-only implementation (awk/sed/grep) — no Python in the minimal llama-swap image
+- Adaptive gmem for mod-script models; corrected pp display in output
+
+---
+
+## [0.3.0] — 2026-04-28
+
+### Added
+- **`launch-vllm-auto.sh`**: Generic adaptive `--gpu-memory-utilization` for vLLM — estimates
+  required VRAM from safetensor weights + KV cache + safety headroom, picks the smallest
+  utilization that satisfies the estimate within `[GMEM_MIN, GMEM_MAX]`
+
+### Fixed
+- `llama-swap` dynamic VRAM allocation for 122B model; fix docker-compose networking
+- `benchmark-models.sh`: Support llama-benchy installed via pip in addition to uvx
+- `gpu_memory_utilization` floor for 122B raised `0.60` → `0.82`
+
+---
+
+## [0.2.0] — 2026-04-19
+
+### Added
+- Sample configs for LiteLLM and llama-swap (sanitized)
+- `benchmark-models.sh`: S/M/L concurrent groups, `--resume`, `--arena` mode,
+  coherence detection, spark-arena-cli integration
+- `tool-eval-bench` runner; tuned 122B launcher for tool calling
+- README, TUTORIAL.md with setup guide, benchmarks, and model download commands
+
+### Fixed
+- `benchmark-models.sh`: Stabilize script; enhance coherence checks
+
+---
+
+## [0.1.0] — 2026-03-29
+
+### Added
+- Unified DGX Spark / Grace-Blackwell AI orchestration stack
+- llama-swap orchestrator for on-demand model loading/eviction
+- vLLM support for safetensors models (FP8, NVFP4, compressed-tensors)
+- llama.cpp support for GGUF models
+- Ollama support for pulled models via modelfile format
+- LiteLLM unified API gateway on port 14000
 - GB10 unified-memory optimizations across all services
-- Private registry support (GitLab, Harbor, Nexus) via `REGISTRY` / `IMAGE_NAMESPACE`
-- Setup wizard (`setup/setup.sh`) with NVIDIA runtime check
+- Docker publish workflow for multiple image builds
+
+---
+
+<!-- version diff links — update tags in GitHub after each release -->
+[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/releases/tag/v0.1.0
