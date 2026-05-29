@@ -90,6 +90,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - LLM_ROOT_PATH=${LLM_ROOT_PATH}
 
     networks:
       - dgx_net
