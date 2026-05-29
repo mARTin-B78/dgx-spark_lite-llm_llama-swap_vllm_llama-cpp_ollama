@@ -37,27 +37,29 @@ version: '3.8'
 services:
 
   # ==========================================
-  # 1. VLLM (Primary Safetensors Engine)
+  # 1. VLLM (Primary Safetensors Engine) — DISABLED
   # ==========================================
   # NOTE: In practice, vLLM instances are typically managed by llama-swap
-  # (service 3) as ephemeral on-demand containers. Keep this block only if
-  # you want a *persistent* vLLM sidecar running alongside llama-swap.
-  vllm:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/vllm-spark:latest
-    container_name: vllm
-    restart: unless-stopped
-    ipc: host
-    ports:
-      - "19000:8000"  # vLLM internal is always 8000; exposed as 18000
-    volumes:
-      - ${LLM_ROOT_PATH}/safetensors:/model
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
-    command: >
-      --model /model/Qwen3.5-7B-Instruct --host 0.0.0.0 --port 8000
-    networks: [dgx_net]
+  # (service 3) as ephemeral on-demand containers. Uncomment this block only
+  # if you want a *persistent* vLLM sidecar running alongside llama-swap.
+  # Requires vllm-spark image to be built and pushed to your registry first.
+  #
+  # vllm:
+  #   image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/vllm-spark:latest
+  #   container_name: vllm
+  #   restart: unless-stopped
+  #   ipc: host
+  #   ports:
+  #     - "18000:8000"  # vLLM internal is always 8000; exposed as 18000
+  #   volumes:
+  #     - ${LLM_ROOT_PATH}/safetensors:/model
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+  #   command: >
+  #     --model /model/Qwen3.5-7B-Instruct --host 0.0.0.0 --port 8000
+  #   networks: [dgx_net]
 
 
   # ==========================================
@@ -77,7 +79,7 @@ services:
       memlock: -1                      # Unlimited locked memory — needed for unified VRAM
       stack: 67108864
     ports:
-      - "18080:18080"
+      - "19000:19000"
     volumes:
       - ${LLM_ROOT_PATH}/ollama:/models/ollama
       # Mount individual GGUF files if you only want specific models:
@@ -95,7 +97,7 @@ services:
       - --host
       - "0.0.0.0"
       - --port
-      - "18080"
+      - "19000"
       - --parallel
       - "4"          # Simultaneous request slots
       - --no-mmap    # Disable memory-mapped I/O (required for unified memory on GB10)
