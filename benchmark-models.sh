@@ -1828,9 +1828,12 @@ log "  ${DIM}tg = token generation  (how fast the model writes its reply)${NC}"
 log "  ${DIM}depth = pre-filled context tokens (simulates document size)${NC}"
 log ""
 
-# Initialize crash-resume checkpoint and, if --resume, load previous state
-init_checkpoint
+# Initialize crash-resume checkpoint and, if --resume, load previous state.
+# load_resume_checkpoint must run BEFORE init_checkpoint: init_checkpoint
+# overwrites .last-session with the new session path, so reading it afterwards
+# returns the new (empty) checkpoint instead of the previous one.
 [[ "$RESUME" == true ]] && load_resume_checkpoint
+init_checkpoint
 
 # Detect how llama-benchy is available: uvx (preferred), direct, or missing
 if uvx llama-benchy --help > /dev/null 2>&1; then
