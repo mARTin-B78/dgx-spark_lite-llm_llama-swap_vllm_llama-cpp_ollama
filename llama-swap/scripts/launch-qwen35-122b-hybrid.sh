@@ -66,7 +66,7 @@ docker run --rm --name "${CONTAINER_NAME}" \
     bash -c "
         cd /opt/mod && ./run.sh &&
         exec vllm serve /models/vllm/Alibaba/Qwen3.5-122B-A10B-hybrid-int4fp8 \
-            --served-model-name Qwen3.5-122B-A10B-int4-AutoRound \
+            --served-model-name Qwen3.5-122B-A10B-hybrid-int4fp8 \
             --host '${HOST}' --port '${PORT}' \
             --gpu-memory-utilization '${GMEM}' \
             --max-model-len 131072 \
