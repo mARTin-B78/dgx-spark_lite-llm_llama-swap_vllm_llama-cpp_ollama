@@ -11,6 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.0] — 2026-06-12
+
+### Added
+- **`mods/fix-qwen3.5-hybrid-int4fp8/`** *(spark-vllm-docker)*: New mod applying three
+  stacked optimizations to the Qwen3.5-122B-A10B-int4-AutoRound inference path, lifting
+  throughput from 28.3 → ~51 tok/s (+80%) on a single DGX Spark:
+  - `patch_inc.py`: Patches vLLM's INC quantization backend to detect FP8 dense layers
+    in a hybrid checkpoint and dispatch them through CUTLASS block-wise FP8 GEMM
+    (`Fp8LinearMethod`) instead of the BF16 fallback (+8.8%). Works with vLLM 0.21+.
+  - `patch_int8_lmhead.py`: INT8 LM Head v2 — replaces the per-token Python loop with a
+    single batched 2D Triton GEMV kernel with `@triton.autotune` for SM121 (+~40%).
+  - `host/build-hybrid-checkpoint.py`: One-time host-side script that merges MoE expert
+    weights (INT4, from Intel AutoRound) with dense layer weights (FP8 E4M3, from the
+    official Qwen/Qwen3.5-122B-A10B-FP8 checkpoint) into a single hybrid safetensors
+    checkpoint (~9 GB smaller than the INT4 original).
+  - `host/add-mtp-weights.py`: Surfaces the MTP speculative-decoding tensors already
+    present in the AutoRound checkpoint by adding them to the index of the hybrid
+    checkpoint, enabling MTP-2 (`num_speculative_tokens=2`, ~80% accept rate, +25%).
+- **`recipes/qwen3.5-122b-hybrid-int4fp8.yaml`** *(spark-vllm-docker)*: Recipe for the
+  hybrid model; includes the new mod, sets `--speculative-config mtp:2`, single-GPU,
+  `--kv-cache-dtype fp8`, `--attention-backend FLASHINFER`.
+- **`llama-swap/scripts/launch-qwen35-122b-hybrid.sh`**: llama-swap launch script for the
+  hybrid checkpoint with adaptive `gpu_memory_utilization`, MTP-2 speculative decoding,
+  and inline mod application at container start.
+
+---
+
 ## [0.9.0] — 2026-06-12
 
 ### Added
@@ -180,7 +207,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 <!-- version diff links — update tags in GitHub after each release -->
-[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.4.0...v0.5.0
