@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.0] — 2026-06-12
+
+### Added
+- **`docker-compose.yml`**: New `llama-qwen35-4b` always-on service — dedicated persistent
+  llama.cpp instance for Qwen3.5-4B-Q4_K_M; stays loaded regardless of llama-swap evictions,
+  sized for the STT→LLM→TTS pipeline (low latency, always warm, ctx 131072).
+- **`LiteLLM/complexity_hook.py`**: Custom `CustomLogger` pre-call hook that rewrites `model`
+  to a complexity-tiered target before LiteLLM routes the request. Fires on all endpoints
+  (including `/v1/responses`) where the native `auto_router` type is unsupported.
+- **`LiteLLM/router.json`**: Semantic router config for embedding-based intent routing
+  (requires `OPENAI_API_KEY` for the embedding call).
+- **`scripts/start-ds4-deepseek.sh`**: Startup script for the DS4 DeepSeek node.
+
+### Changed
+- **`LiteLLM/config.yaml.sample`**: Add `auto_router1` (complexity-based, 4 tiers: SIMPLE →
+  4B, MEDIUM → 27B, COMPLEX → 35B, REASONING → 122B) and `semantic-router` (embedding-based
+  intent routing) model entries.
+- **`docker-compose.yml`** / **`docker-compose.yml.sample`**: Mount `router.json` and
+  `complexity_hook.py` into the LiteLLM container; add optional `OPENAI_API_KEY` env var.
+
+### Chore
+- **`.gitignore`**: Ignore `ds4/` (compiled binaries + model), `logs/`, `*.o`, `*.pid`.
+
+---
+
 ## [0.8.0] — 2026-06-12
 
 ### Fixed
