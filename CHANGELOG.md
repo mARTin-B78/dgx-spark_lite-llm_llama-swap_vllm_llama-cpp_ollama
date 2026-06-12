@@ -9,12 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.8.0] — 2026-06-12
+
 ### Fixed
 - **`launch-vllm-auto.sh`**: Broken `/models/vllm` volume mount when `LLM_ROOT_PATH` already
   points to the vllm directory (e.g. `/home/user/LLMs/vllm`). Script was appending `/vllm`,
   producing a double-`vllm` path that Docker auto-created as an empty directory — all vllm
   models started with an empty `/models/vllm` mount and failed with "chat template not found".
   Default fallback updated from `/home/user/LLMs` → `/home/user/LLMs/vllm`.
+
+### Changed
+- **`llama-swap/config.yaml.sample`**: Set all model `ttl: 0` (was `ttl: 3600`/`600`/`300`).
+  Models now stay loaded in VRAM until the swap mechanism evicts them when a different model
+  is requested, instead of auto-unloading after an idle timeout.
 
 ### Changed *(config.yaml — gitignored, applied manually)*
 - **Qwen3.6-35B-A3B-FP8**: Removed `GMEM_OVERRIDE=0.7069`; model now uses adaptive
