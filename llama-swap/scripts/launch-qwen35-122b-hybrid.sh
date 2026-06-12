@@ -60,7 +60,7 @@ docker run --rm --name "${CONTAINER_NAME}" \
     --runtime nvidia --gpus all --ipc=host --network container:llama-swap \
     -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1 \
     -e VLLM_MARLIN_USE_ATOMIC_ADD=1 \
-    -v "${LLM_ROOT_PATH:-/home/sparky/LLMs}/vllm:/models/vllm" \
+    -v "${LLM_ROOT_PATH:-/home/sparky/LLMs/vllm}:/models/vllm" \
     -v "${MOD_DIR}:/opt/mod:ro" \
     vllm-node:latest \
     bash -c "
