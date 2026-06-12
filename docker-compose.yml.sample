@@ -210,9 +210,11 @@ services:
       - DATABASE_URL=${DATABASE_URL}        # postgresql://litellm_admin:PW@litellm-db:5432/litellm
       - UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username for the LiteLLM web UI
       - UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password for the LiteLLM web UI
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}  # Optional: only needed for semantic-router embeddings
     # - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}  # Uncomment to enforce API key auth
     volumes:
       - ${REPO_CONFIG_PATH}/LiteLLM/config.yaml:/app/config.yaml
+      - ${REPO_CONFIG_PATH}/LiteLLM/router.json:/app/router.json:ro
     command:
       - "--config"
       - "/app/config.yaml"

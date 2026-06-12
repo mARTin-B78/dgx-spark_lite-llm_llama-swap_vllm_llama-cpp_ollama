@@ -1,0 +1,76 @@
+{
+  "encoder_type": "openai",
+  "encoder_name": "text-embedding-3-small",
+  "routes": [
+    {
+      "name": "Qwen3-Coder-Next-FP8-Dynamic",
+      "description": "Coding, debugging, refactoring, and software architecture",
+      "score_threshold": 0.72,
+      "utterances": [
+        "write code for [task]",
+        "debug this error",
+        "explain this stack trace",
+        "refactor this function",
+        "design a software architecture",
+        "optimize this database query",
+        "create a docker compose file",
+        "fix this python script",
+        "help me with a React component"
+      ],
+      "function_schemas": null,
+      "llm": null,
+      "metadata": {}
+    },
+    {
+      "name": "Qwen3.5-122B-A10B-int4-AutoRound",
+      "description": "Deep reasoning, planning, math, analysis, and hard multi-step tasks",
+      "score_threshold": 0.72,
+      "utterances": [
+        "think step by step",
+        "reason carefully through this problem",
+        "solve this math proof",
+        "analyze these tradeoffs",
+        "make a detailed plan",
+        "evaluate multiple options",
+        "explain the implications",
+        "derive the formula",
+        "find the hidden assumption"
+      ],
+      "function_schemas": null,
+      "llm": null,
+      "metadata": {}
+    },
+    {
+      "name": "Qwen3-VL-30B-A3B-Instruct-FP8",
+      "description": "Vision and image-understanding requests",
+      "score_threshold": 0.7,
+      "utterances": [
+        "what is in this image",
+        "describe this picture",
+        "read the text in this screenshot",
+        "analyze this chart",
+        "compare these images",
+        "extract information from this photo"
+      ],
+      "function_schemas": null,
+      "llm": null,
+      "metadata": {}
+    },
+    {
+      "name": "Qwen3.6-35B-A3B-FP8",
+      "description": "General complex answers that need a larger text model",
+      "score_threshold": 0.74,
+      "utterances": [
+        "write a long detailed answer",
+        "summarize this long document",
+        "compare these technical choices",
+        "explain this complex topic",
+        "create a comprehensive guide",
+        "help me make a decision with pros and cons"
+      ],
+      "function_schemas": null,
+      "llm": null,
+      "metadata": {}
+    }
+  ]
+}

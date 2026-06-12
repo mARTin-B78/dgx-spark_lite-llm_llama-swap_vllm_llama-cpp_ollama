@@ -120,6 +120,57 @@ services:
 
 
   # ==========================================
+  # 2b. LLAMA-QWEN35-4B (Always-On Persistent GGUF Engine)
+  # ==========================================
+  # Dedicated persistent instance for Qwen3.5-4B-Q4_K_M.
+  # Stays loaded regardless of what llama-swap loads or evicts — no ttl, no cmdStop.
+  # Sized for the STT→LLM→TTS pipeline: low latency, always warm.
+  # llama-swap routes to it via endpoint: http://llama-qwen35-4b:19001
+  llama-qwen35-4b:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
+    container_name: llama-qwen35-4b
+    restart: unless-stopped
+    ipc: host
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ports:
+      - "19001:19001"
+    volumes:
+      - /home/sparky/LLMs/ollama:/models/ollama
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+    environment:
+      - GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+    command:
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "19001"
+      - -m
+      - /models/ollama/Alibaba/Qwen3.5-4B/Qwen3.5-4B-Q4_K_M.gguf
+      - --alias
+      - Qwen3.5-4B-Q4_K_M
+      - --parallel
+      - "2"
+      - --no-mmap
+      - --n-gpu-layers
+      - "99"
+      - --ctx-size
+      - "131072"
+      - --jinja
+      - --chat-template-kwargs
+      - '{"enable_thinking":false}'
+      - --timeout
+      - "600"
+    networks: [dgx_net]
+
+
+  # ==========================================
   # 3. LLAMA-SWAP (The VRAM Manager)
   # ==========================================
   # Orchestrates all inference containers: spawns them on demand via docker.sock,
@@ -212,9 +263,12 @@ services:
       - DATABASE_URL=${DATABASE_URL}        # postgresql://litellm_admin:PW@litellm-db:5432/litellm
       - UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username for the LiteLLM web UI
       - UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password for the LiteLLM web UI
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}  # Optional: only needed for semantic-router embeddings
     # - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}  # Uncomment to enforce API key auth
     volumes:
       - ${REPO_CONFIG_PATH}/LiteLLM/config.yaml:/app/config.yaml
+      - ${REPO_CONFIG_PATH}/LiteLLM/router.json:/app/router.json:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/complexity_hook.py:/app/complexity_hook.py:ro
     command:
       - "--config"
       - "/app/config.yaml"

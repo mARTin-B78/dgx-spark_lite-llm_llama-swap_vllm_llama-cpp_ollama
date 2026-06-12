@@ -13,6 +13,12 @@ vllm/build/
 test-results/
 FORUM_UPDATE.md
 probe-models.sh
+ds4/
+*.o
+*.pid
+
+# --- Runtime Logs & State ---
+logs/
 
 # --- Setup Output (auto-generated, not tracked) ---
 setup/SETUP_SUMMARY.txt
