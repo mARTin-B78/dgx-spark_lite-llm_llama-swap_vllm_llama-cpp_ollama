@@ -157,7 +157,7 @@ models:
 
 
   Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:
-    ttl: 600
+    ttl: 0
     readyTimeout: 300
     checkEndpoint: "/health"
     cmd: >
@@ -184,7 +184,7 @@ models:
   # --parallel 2 (not 4): halves KV cache (~17 GiB → ~8.5 GiB at 65K ctx).
   # ⚠️  Update -m path to the exact GGUF filename after download.
   Qwen3.6-27B-uncensored-heretic-NVFP4:
-    ttl: 600
+    ttl: 0
     readyTimeout: 300
     checkEndpoint: "/health"
     cmd: >
@@ -260,10 +260,18 @@ models:
 
 
   # --- VLLM MODELS ---
+  # --- DeepSeek V4 Flash IQ2XXS (DS4 GGUF server) ---
+  # Start host server with: ./scripts/start-ds4-deepseek.sh
+  DeepSeek-V4-Flash-IQ2XXS-DS4:
+    cmd: "sleep infinity"
+    proxy: "http://192.168.178.8:18004"
+    checkEndpoint: "none"
+    ttl: 0
+
   # --- spark-arena winner recipe: vllm-node-tf5 + Mamba float16 + large batches ---
   # Adaptive gmem via launch-vllm-auto.sh. Set GMEM_OVERRIDE=0.40 to pin static.
   Qwen3.5-35B-A3B-FP8:
-    ttl: 600
+    ttl: 0
     readyTimeout: 600
     checkEndpoint: "/health"
     cmd: >
@@ -302,7 +310,7 @@ models:
   # "adaptive" (or remove the line) to let the launcher compute it. Image
   # vllm/vllm-openai has `vllm serve` as ENTRYPOINT → VLLM_SERVE_PREFIX="".
   Qwen3.6-35B-A3B-FP8:
-    ttl: 600
+    ttl: 0
     readyTimeout: 600
     checkEndpoint: "/health"
     cmd: >
@@ -344,10 +352,14 @@ models:
   # consecutive non-blank lines. Fixed here.
   #
   # CUDA_MANAGED_FORCE_DEVICE_ALLOC=1 removed: unsafe on GB10 unified memory.
-  # MTP tokens 3→1: spec-decode + PIECEWISE CUDA graphs triggered a
-  # −11.67 GiB estimate overflow in vLLM 0.21.1rc1; k=1 avoids that path.
+  # Reliable-load profile:
+  #   - 32K context + 2 seqs keeps KV/cache pressure low on GB10 unified memory.
+  #   - enforce-eager avoids the long CUDA graph capture/autotune path that can
+  #     over-allocate with spec-decode on this hybrid/Mamba architecture.
+  #   - MTP/DFlash can be re-enabled later as a speed profile once base load is
+  #     boringly reliable.
   Qwen3.6-27B-PrismaSCOUT-NVFP4:
-    ttl: 600
+    ttl: 0
     readyTimeout: 600
     checkEndpoint: "/health"
     cmd: >
@@ -357,24 +369,25 @@ models:
       CONTAINER_NAME=vllm-qwen3.6-27b-${PORT}
       IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
-      MAX_MODEL_LEN=65536 MAX_NUM_SEQS=4 KV_DTYPE_BYTES=1
-      GMEM_MIN=0.45 GMEM_MAX=0.65 SAFETY_GIB=4
+      MAX_MODEL_LEN=32768 MAX_NUM_SEQS=1 KV_DTYPE_BYTES=1
+      GMEM_MIN=0.30 GMEM_MAX=0.36 SAFETY_GIB=4
       EXTRA_DOCKER_ARGS='-e NVIDIA_FORWARD_COMPAT=1 -e VLLM_MARLIN_USE_ATOMIC_ADD=1 -e FLASHINFER_DISABLE_VERSION_CHECK=1 -e TORCH_MATMUL_PRECISION=high -e VLLM_TEST_FORCE_FP8_MARLIN=1 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3.6-27B-PrismaSCOUT-NVFP4 qwen3.6-27b
       --chat-template /models/vllm/Alibaba/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm/chat_template-tool-strict.jinja
       --language-model-only
-      --max-num-batched-tokens 32768
+      --max-num-batched-tokens 4096
       --quantization compressed-tensors
       --kv-cache-dtype fp8
       --load-format fastsafetensors
       --enable-prefix-caching
       --enable-chunked-prefill
+      --enforce-eager
+      --no-enable-flashinfer-autotune
       --trust-remote-code
       --reasoning-parser qwen3
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
-      --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
     cmdStop: "docker stop vllm-qwen3.6-27b-${PORT}"
 
   # --- forum-tuned: mamba float16 + large batches + FP8 KV cache ---
@@ -382,7 +395,7 @@ models:
   # gpu_memory_utilization dynamically (max 0.85, min 0.60) so vLLM's startup
   # sanity check never fails due to residual CUDA memory from previous containers.
   Qwen3.5-122B-A10B-int4-AutoRound:
-    ttl: 3600
+    ttl: 0
     readyTimeout: 1800
     checkEndpoint: "/health"
     cmd: /app/scripts/launch-qwen35-122b.sh ${PORT} ${host}
@@ -390,7 +403,7 @@ models:
 
   # --- Works - is for Visual Stuff with Pictures ---
   Qwen3-VL-30B-A3B-Instruct-FP8:
-    ttl: 600
+    ttl: 0
     readyTimeout: 600
     checkEndpoint: "/health"
     cmd: >
@@ -420,7 +433,7 @@ models:
   # Static --gpu-memory-utilization 0.40 (~49 GiB) was below weights → KV ValueError.
   # Switched to launch-vllm-auto.sh: GMEM_MIN=0.60, GMEM_MAX=0.75.
   Qwen3-Omni-30B-A3B-Instruct:
-    ttl: 600
+    ttl: 0
     readyTimeout: 600
     checkEndpoint: "/health"
     cmd: >
@@ -473,7 +486,7 @@ models:
   # If you switch to (B), also bump OpenClaw's
   # ~/.openclaw/openclaw.json -> contextWindow: 262144
   Qwen3-Coder-Next-FP8-Dynamic:
-    ttl: 3600
+    ttl: 0
     readyTimeout: 1200
     checkEndpoint: "/health"
     cmd: >
@@ -512,7 +525,7 @@ models:
   # precision past the breaking point. For long-context coding, use the
   # FP8-Dynamic variant instead (128k coherent).
   Qwen3-Coder-Next-int4-AutoRound:
-    ttl: 3600
+    ttl: 0
     readyTimeout: 1200
     checkEndpoint: "/health"
     cmd: >
@@ -543,7 +556,7 @@ models:
 
 # --- Instant Orchestrator - Blackwell Optimized FP8 ---
   Nemotron-3-Nano-4B-FP8:
-    ttl: 300
+    ttl: 0
     readyTimeout: 300
     checkEndpoint: "/health"
     cmd: >
@@ -570,7 +583,7 @@ models:
 
   # --- spark-arena winner recipe: moe-backend cutlass, CUDA graphs, 57 tok/s ---
   Nemotron-3-Nano-30B-A3B-NVFP4:
-    ttl: 300
+    ttl: 0
     readyTimeout: 600
     checkEndpoint: "/health"
     cmd: >
@@ -641,7 +654,7 @@ models:
   # (~97 GiB) failed mid-benchmark when prior models leaked CUDA memory;
   # adaptive launcher with GMEM_MAX=0.85 fits to actually-free VRAM.
   Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4:
-    ttl: 3600
+    ttl: 0
     readyTimeout: 1200
     checkEndpoint: "/health"
     cmd: >
@@ -676,7 +689,7 @@ models:
 # --- NVIDIA Nemotron-3 Super (120B MoE - Blackwell Optimized NVFP4) ---
 # Adaptive gmem (GMEM_MAX=0.85 ceiling — large 120B model needs the headroom).
   Nemotron-3-Super-120B-A12B-NVFP4:
-    ttl: 3600
+    ttl: 0
     readyTimeout: 1800
     checkEndpoint: "/health"
     cmd: >
@@ -710,7 +723,7 @@ models:
   # --- spark-arena winner recipe + exp-mxfp4 CUTLASS build ---
   # Adaptive gmem (GMEM_MAX=0.85). Templates dir mounted via EXTRA_DOCKER_ARGS.
   GPT-OSS-120B:
-    ttl: 3600
+    ttl: 0
     readyTimeout: 1200
     checkEndpoint: "/health"
     cmd: >
