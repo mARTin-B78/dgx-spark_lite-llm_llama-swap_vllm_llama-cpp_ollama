@@ -22,34 +22,31 @@ set -euo pipefail
 PORT="${1}"
 HOST="${2}"
 
-# ── Memory query (same as baseline script) ────────────────────────────────────
-MEM_LINE=$(docker run --rm --runtime nvidia --gpus all \
-    vllm-node:latest \
-    sh -c "nvidia-smi --query-gpu=memory.free,memory.total --format=csv,noheaders,nounits | head -1" \
-    2>/dev/null || true)
+# ── Memory query via /proc/meminfo ────────────────────────────────────────────
+# nvidia-smi memory.free returns "Not Supported" on GB10 unified memory.
+# /proc/meminfo in the llama-swap container reflects the host unified pool.
+# CUDA sees ~121.69 GiB of the 128 GiB pool; subtract OS/driver overhead and a
+# 5 GiB buffer for the MemAvailable→cudaMemGetInfo race at vLLM startup.
+# Floor 0.55 accommodates the always-on 4B service + TTS consuming ~48 GiB.
+MEM_AVAIL_KB=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
+MEM_TOTAL_KB=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
 
-FREE_MIB=$(echo "$MEM_LINE" | awk -F',' '{gsub(/ /,"",$1); print $1+0}')
-TOTAL_MIB=$(echo "$MEM_LINE" | awk -F',' '{gsub(/ /,"",$2); print $2+0}')
+GMEM=$(awk -v a="${MEM_AVAIL_KB:-0}" -v t="${MEM_TOTAL_KB:-134217728}" 'BEGIN {
+    cuda_total  = 121.69;
+    avail_gib   = a / 1048576;
+    mem_total   = t / 1048576;
+    overhead    = mem_total - cuda_total;
+    if (overhead < 0) overhead = 0;
+    free_gib    = avail_gib - overhead - 5;
+    if (free_gib < 0) free_gib = 0;
+    u = free_gib / cuda_total;
+    if (u > 0.85) u = 0.85;
+    if (u < 0.55) u = 0.55;
+    printf "%.2f", u;
+}')
 
-FREE_NUM=${FREE_MIB:-0}
-if [ "${FREE_NUM}" -lt 1000 ] 2>/dev/null; then
-    echo "[122B-hybrid auto-gmem] WARNING: VRAM query returned ${FREE_MIB:-empty}, falling back to gmem=0.80"
-    GMEM="0.80"
-else
-    GMEM=$(awk -v f="$FREE_MIB" -v t_nv="$TOTAL_MIB" 'BEGIN {
-        cuda_t  = 124610;
-        safety  = 3072;
-        overhead = (t_nv > cuda_t) ? t_nv - cuda_t : 0;
-        cuda_free = f - overhead - safety;
-        if (cuda_free < 0) cuda_free = 0;
-        u = cuda_free / cuda_t;
-        if (u > 0.85) u = 0.85;
-        if (u < 0.78) u = 0.78;
-        printf "%.2f", u;
-    }')
-fi
-
-echo "[122B-hybrid auto-gmem] nvidia-smi free=${FREE_MIB} MiB / total=${TOTAL_MIB} MiB → gpu_memory_utilization=${GMEM}"
+AVAIL_GIB=$(awk -v k="${MEM_AVAIL_KB:-0}" 'BEGIN{printf "%.1f", k/1048576}')
+echo "[122B-hybrid auto-gmem] MemAvailable=${AVAIL_GIB} GiB → gpu_memory_utilization=${GMEM}"
 
 # ── Apply mod and launch ──────────────────────────────────────────────────────
 MOD_DIR="/home/sparky/llama-service/spark-vllm-docker/mods/fix-qwen3.5-hybrid-int4fp8"
