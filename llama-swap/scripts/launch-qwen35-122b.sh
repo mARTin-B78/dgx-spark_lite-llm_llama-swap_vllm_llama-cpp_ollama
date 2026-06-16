@@ -14,7 +14,10 @@ HOST="${2}"
 # nvidia-smi memory.free returns "Not Supported" on GB10 unified memory.
 # /proc/meminfo in the llama-swap container reflects the host unified pool.
 # CUDA sees ~121.69 GiB of the 128 GiB pool; subtract OS/driver overhead and a
-# 5 GiB buffer for the MemAvailable→cudaMemGetInfo race at vLLM startup.
+# 14 GiB buffer to cover the MemAvailable→cudaMemGetInfo gap at vLLM startup.
+# On GB10, MemTotal ≤ cuda_total so overhead=0, and CUDA context + driver
+# consume ~11 GiB not reflected in MemAvailable (observed: 98.8 GiB available
+# but only 87.59 GiB free in CUDA). 14 GiB buffer keeps us safely below that.
 # Floor 0.55 accommodates the always-on 4B service + TTS consuming ~48 GiB.
 MEM_AVAIL_KB=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
 MEM_TOTAL_KB=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
@@ -25,7 +28,7 @@ GMEM=$(awk -v a="${MEM_AVAIL_KB:-0}" -v t="${MEM_TOTAL_KB:-134217728}" 'BEGIN {
     mem_total   = t / 1048576;
     overhead    = mem_total - cuda_total;
     if (overhead < 0) overhead = 0;
-    free_gib    = avail_gib - overhead - 5;
+    free_gib    = avail_gib - overhead - 14;
     if (free_gib < 0) free_gib = 0;
     u = free_gib / cuda_total;
     if (u > 0.85) u = 0.85;

@@ -673,7 +673,14 @@ fi
 log() { echo -e "$1" | tee -a "$REPORT_FILE"; }
 
 unload_all() {
-    curl -sf -X POST "$LLAMA_SWAP_URL/unload" > /dev/null 2>&1 || true
+    # /unload is not a valid llama-swap endpoint (404) — unload each running
+    # model explicitly via /api/models/unload/<model>.
+    local running_models
+    running_models=$(curl -s --max-time 5 "$LLAMA_SWAP_URL/running" 2>/dev/null | jq -r '(.running // .)[].model' 2>/dev/null)
+    local m
+    for m in $running_models; do
+        curl -sf -X POST "$LLAMA_SWAP_URL/api/models/unload/$m" > /dev/null 2>&1 || true
+    done
     # Poll until BOTH (a) llama-swap reports no running upstream AND (b) no
     # docker model-runner container is still present. llama-swap removes the
     # container from its /running list as soon as it sends the stop, but
@@ -716,9 +723,48 @@ unload_all() {
         sleep 2
         waited=$((waited + 2))
     done
-    # Final settle so VRAM the docker daemon just released is visible to the
-    # next process (the kernel needs a moment to reflect freed device memory).
-    sleep 5
+
+    # If docker containers are still running after the timeout (e.g. orphaned
+    # containers from a previous llama-swap session that survived a restart),
+    # force-stop them rather than proceeding with CUDA memory occupied.
+    local orphans
+    orphans=$(docker ps --format '{{.Names}}' 2>/dev/null \
+        | grep -E '^(vllm-|llamacpp-|sglang-|ollama-)' || true)
+    if [[ -n "$orphans" ]]; then
+        echo "[unload] Timeout reached with orphaned containers still running — force-stopping:"
+        echo "$orphans" | sed 's/^/  /'
+        echo "$orphans" | xargs -r docker stop 2>/dev/null || true
+        sleep 5
+    fi
+
+    # Wait for MemAvailable to stabilize before returning.
+    # On GB10 unified memory, CUDA frees memory back to the OS gradually via
+    # page-cache reclaim. MemAvailable (which includes reclaimable pages) can
+    # still be misleadingly low right after a container exits because the kernel
+    # hasn't finished reclaiming. If the next model's launch script reads
+    # MemAvailable too soon, it either under-estimates free VRAM (safe but wastes
+    # KV cache) or over-estimates it (risky if cudaMalloc outruns reclaim).
+    # Poll until MemAvailable doesn't change by more than 1 GiB for 3
+    # consecutive 2-second ticks, or 60 seconds have passed.
+    local prev_avail_kb=0 stable=0 settle_waited=0
+    while (( settle_waited < 60 )); do
+        local cur_kb
+        cur_kb=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
+        local diff=$(( cur_kb - prev_avail_kb ))
+        [[ $diff -lt 0 ]] && diff=$(( -diff ))
+        if [[ $diff -lt 1048576 && $prev_avail_kb -gt 0 ]]; then
+            stable=$(( stable + 1 ))
+            [[ $stable -ge 3 ]] && break
+        else
+            stable=0
+        fi
+        prev_avail_kb=$cur_kb
+        sleep 2
+        settle_waited=$(( settle_waited + 2 ))
+    done
+    local avail_gib
+    avail_gib=$(awk '/^MemAvailable:/{printf "%.1f", $2/1048576}' /proc/meminfo)
+    echo "[unload] Memory stable: ${avail_gib} GiB available"
 }
 
 # Warm up: send a tiny request to make llama-swap load the model
@@ -1056,6 +1102,7 @@ get_model_max_len() {
     case "$model" in
         Qwen3.5-35B-A3B-FP8)                                          echo 131072 ;;
         Qwen3.5-122B-A10B-int4-AutoRound)                             echo  40960 ;;
+        Qwen3.5-122B-A10B-hybrid-int4fp8)                            echo 131072 ;;
         Qwen3-VL-30B-A3B-Instruct-FP8)                                echo  32768 ;;
         Qwen3-Omni-30B-A3B-Instruct)                                  echo  32768 ;;
         Qwen3-Coder-Next-FP8-Dynamic)                                 echo  32768 ;;
@@ -1068,6 +1115,7 @@ get_model_max_len() {
         Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF)   echo  16384 ;;
         Qwen3.6-35B-A3B-FP8)                                          echo 262144 ;;
         Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive)               echo  16384 ;;
+        DeepSeek-V4-Flash-IQ2XXS-DS4)                                 echo  65536 ;;
         Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4)                 echo 131072 ;;
         *)                                                            echo "" ;;
     esac
