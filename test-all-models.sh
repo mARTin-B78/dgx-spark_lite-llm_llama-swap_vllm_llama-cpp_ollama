@@ -46,7 +46,14 @@ escape_csv() {
 }
 
 unload_all() {
-    curl -sf -X POST "$LLAMA_SWAP_URL/unload" > /dev/null 2>&1 || true
+    # /unload is not a valid llama-swap endpoint (404) — unload each running
+    # model explicitly via /api/models/unload/<model>.
+    local running_models
+    running_models=$(curl -s --max-time 5 "$LLAMA_SWAP_URL/running" 2>/dev/null | jq -r '(.running // .)[].model' 2>/dev/null)
+    local m
+    for m in $running_models; do
+        curl -sf -X POST "$LLAMA_SWAP_URL/api/models/unload/$m" > /dev/null 2>&1 || true
+    done
     sleep "$UNLOAD_WAIT"
 }
 
