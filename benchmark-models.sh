@@ -1102,7 +1102,6 @@ get_model_max_len() {
     case "$model" in
         Qwen3.5-35B-A3B-FP8)                                          echo 131072 ;;
         Qwen3.5-122B-A10B-int4-AutoRound)                             echo  40960 ;;
-        Qwen3.5-122B-A10B-hybrid-int4fp8)                            echo 131072 ;;
         Qwen3-VL-30B-A3B-Instruct-FP8)                                echo  32768 ;;
         Qwen3-Omni-30B-A3B-Instruct)                                  echo  32768 ;;
         Qwen3-Coder-Next-FP8-Dynamic)                                 echo  32768 ;;

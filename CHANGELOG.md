@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.1] — 2026-06-17
+
+### Removed
+- **`Qwen3.5-122B-A10B-hybrid-int4fp8`** model registration removed from
+  `llama-swap/config.yaml.sample` and `benchmark-models.sh`. The hybrid checkpoint
+  loads successfully but generates garbled/incoherent output (confirmed even at
+  temperature=0, with and without the `mods/fix-qwen3.5-hybrid-int4fp8` patches), so it
+  is no longer exposed as a selectable model. The `mods/` and launch script remain in
+  place for future work once the checkpoint is rebuilt. Use
+  `Qwen3.5-122B-A10B-int4-AutoRound` instead.
+
+---
+
 ## [0.10.0] — 2026-06-12
 
 ### Added
