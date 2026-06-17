@@ -394,18 +394,6 @@ models:
   # Uses a launcher script that queries free VRAM at launch time and sets
   # gpu_memory_utilization dynamically (max 0.85, min 0.60) so vLLM's startup
   # sanity check never fails due to residual CUDA memory from previous containers.
-  #
-  # NOTE: this checkpoint currently loads successfully but generates
-  # garbled/incoherent output (confirmed even at temperature=0, with and
-  # without the mods/fix-qwen3.5-hybrid-int4fp8 patches). The checkpoint
-  # itself likely needs to be rebuilt. See the launch script's comments.
-  Qwen3.5-122B-A10B-hybrid-int4fp8:
-    ttl: 0
-    readyTimeout: 1800
-    checkEndpoint: "/health"
-    cmd: /app/scripts/launch-qwen35-122b-hybrid.sh ${PORT} ${host}
-    cmdStop: "docker stop vllm-qwen3.5-122b-hybrid-${PORT}"
-
   Qwen3.5-122B-A10B-int4-AutoRound:
     ttl: 0
     readyTimeout: 1800
