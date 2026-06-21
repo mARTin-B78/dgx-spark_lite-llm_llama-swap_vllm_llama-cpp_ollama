@@ -90,11 +90,11 @@ models:
 # This config references two distinct families of Docker images:
 #
 # 1. STACK IMAGES  (built by build_and_push.sh, pulled via docker-compose.yml)
-#    ghcr.io/<namespace>/llama-cpp-spark:latest
-#    ghcr.io/<namespace>/vllm-spark:latest   ← persistent, always-on service
-#    ghcr.io/<namespace>/llama-swap-spark:latest
-#    ghcr.io/<namespace>/ollama-spark:latest
-#    ghcr.io/<namespace>/litellm-spark:latest
+#    <registry>/<namespace>/llama-cpp-spark:latest
+#    <registry>/<namespace>/vllm-spark:latest   ← persistent, always-on service
+#    <registry>/<namespace>/llama-swap-spark:latest
+#    <registry>/<namespace>/ollama-spark:latest
+#    <registry>/<namespace>/litellm-spark:latest
 #    These run as long-lived Docker Compose services.
 #
 # 2. EPHEMERAL vLLM IMAGES  (built from vllm/build/spark-vllm-docker submodule)
@@ -113,48 +113,46 @@ models:
 # ==============================================================================
 
 # --- llama.cpp GGUF Model ---
-  # Best for specific GGUF quants not handled well by vLLM
-  # These use the paths from your models.ini but are managed by llama-swap
+# Best for specific GGUF quants not handled well by vLLM
+# These use the paths from your models.ini but are managed by llama-swap
 # --- llama.cpp GGUF Models (Dockerized) - Unified Memory Optimized ---
 
-#  TheDrummer_GLM-Steam-106B-A12B-v1-Q4_K_M-GGUF:
-#    ttl: 3600
-#    readyTimeout: 1200
-#    checkEndpoint: "/health" 
-#    cmd: >
-#      docker run --rm --name llamacpp-glm-${PORT}
-#      --runtime nvidia --gpus all --ipc host --network container:llama-swap
-#      --ulimit memlock=-1 --ulimit stack=67108864
-#      --security-opt seccomp=unconfined
-#      -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
-#      -v <LLM_ROOT_PATH>/ollama:/models/ollama
-#      ghcr.io/martin-b78/llama-cpp-spark:latest
-#      -m /models/ollama/TheDrummer_GLM-Steam/TheDrummer_GLM-Steam-106B-A12B-v1-Q4_K_M-00001-of-00002.gguf
-#      --port ${PORT} --host ${host}
-#      --ctx-size 8192 --n-gpu-layers 99 --parallel 4 --no-mmap
-#    cmdStop: "docker stop llamacpp-glm-${PORT}"
+  TheDrummer_GLM-Steam-106B-A12B-v1-Q4_K_M-GGUF:
+   ttl: 0
+   readyTimeout: 1200
+   checkEndpoint: "/health" 
+   cmd: >
+     docker run --rm --name llamacpp-glm-${PORT}
+     --runtime nvidia --gpus all --ipc host --network container:llama-swap
+     --ulimit memlock=-1 --ulimit stack=67108864
+     --security-opt seccomp=unconfined
+     -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+     -v ${env.LLM_ROOT_PATH}/ollama:/models/ollama
+     ${env.REGISTRY}/${env.IMAGE_NAMESPACE}/llama-cpp-spark:latest
+     -m /models/ollama/TheDrummer/GLM-Steam-106B-A12B-v1-GGUF/GLM-Steam-106B-A12B-v1b-Q4_K_M-00001-of-00002.gguf
+     --port ${PORT} --host ${host}
+     --ctx-size 8192 --n-gpu-layers 99 --parallel 4 --no-mmap
+   cmdStop: "docker stop llamacpp-glm-${PORT}"
 
 #  TheDrummer_GLM-Steam-106B-A12B-v1-Q4_K_M:
 #    endpoint: "http://127.0.0.1:18080"
     # No cmd needed since the server is already running
     # llama-swap will route requests here when this model name is called
 
-
-#  Nemotron-3-Nano-4B-Q4_K_M-GGUF:
-#    ttl: 300
-#    readyTimeout: 300
-#    checkEndpoint: "/health" 
-#    cmd: >
-#      docker run --rm --name llamacpp-nano-${PORT}
-#      --runtime nvidia --gpus all --ipc host --network container:llama-swap
-#      -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
-#      -v <LLM_ROOT_PATH>/ollama:/models/ollama
-#      ghcr.io/martin-b78/llama-cpp-spark:latest
-#      -m /models/ollama/Nvidia/Nemotron-3-Nano-4B-Q4_K_M/NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf
-#      --port ${PORT} --host ${host}
-#      --ctx-size 8192 --n-gpu-layers 99 --parallel 1 --no-mmap
-#    cmdStop: "docker stop llamacpp-nano-${PORT}"
-
+  Nemotron-3-Nano-4B-Q4_K_M-GGUF:
+   ttl: 0
+   readyTimeout: 300
+   checkEndpoint: "/health" 
+   cmd: >
+     docker run --rm --name llamacpp-nano-${PORT}
+     --runtime nvidia --gpus all --ipc host --network container:llama-swap
+     -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+     -v ${env.LLM_ROOT_PATH}/gguf:/models/gguf
+     ${env.REGISTRY}/${env.IMAGE_NAMESPACE}/llama-cpp-spark:latest
+     -m /models/gguf/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF/NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf
+     --port ${PORT} --host ${host}
+     --ctx-size 8192 --n-gpu-layers 99 --parallel 1 --no-mmap
+   cmdStop: "docker stop llamacpp-nano-${PORT}"
 
   Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:
     ttl: 0
@@ -166,15 +164,13 @@ models:
       --ulimit memlock=-1 --ulimit stack=67108864
       --security-opt seccomp=unconfined
       -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
-      -v <LLM_ROOT_PATH>/vllm:/models/vllm
-      ghcr.io/martin-b78/llama-cpp-spark:latest
-      -m /models/vllm/Alibaba/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ2_M.gguf
+      -v ${env.LLM_ROOT_PATH}/vllm:/models/vllm
+      ${env.REGISTRY}/${env.IMAGE_NAMESPACE}/llama-cpp-spark:latest
+      -m /models/vllm/HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ2_M.gguf
       --port ${PORT} --host ${host}
       --ctx-size 65536 --n-gpu-layers 99 --parallel 4 --no-mmap
       --jinja
-      --chat-template-file /models/vllm/Alibaba/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive/chat_template-tool-strict-nothink.jinja
     cmdStop: "docker stop llamacpp-qwen-${PORT}"
-
 
   # --- Qwen3.6-27B Uncensored Heretic v2 (NVFP4-MLP GGUF, llama.cpp) ---
   # Abliterated via Heretic MPOA v2 — all 15 MTP tensors preserved.
@@ -192,9 +188,9 @@ models:
       --runtime nvidia --gpus all --ipc host --network container:llama-swap
       --ulimit memlock=-1 --ulimit stack=67108864
       --security-opt seccomp=unconfined
-      -v <LLM_ROOT_PATH>/ollama:/models/ollama
-      ghcr.io/<IMAGE_NAMESPACE>/llama-cpp-spark:latest
-      -m /models/ollama/Alibaba/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-NVFP4-GGUF/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-NVFP4-MLP-Only.gguf
+      -v ${env.LLM_ROOT_PATH}/ollama:/models/ollama
+      ${env.REGISTRY}/${env.IMAGE_NAMESPACE}/llama-cpp-spark:latest
+      -m /models/ollama/llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-NVFP4-GGUF/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-NVFP4-MLP-Only.gguf
       --alias Qwen3.6-27B-uncensored-heretic-NVFP4
       --port ${PORT} --host ${host}
       --ctx-size 65536 --n-gpu-layers 99 --parallel 2
@@ -202,54 +198,52 @@ models:
       --reasoning-budget 1024
     cmdStop: "docker stop llamacpp-qwen27b-${PORT}"
 
+  Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-BF16:
+   ttl: 0
+   readyTimeout: 300
+   checkEndpoint: "/health" 
+   cmd: >
+     docker run --rm --name llamacpp-qwen-${PORT}
+     --runtime nvidia --gpus all --ipc host --network container:llama-swap
+     --ulimit memlock=-1 --ulimit stack=67108864
+     --security-opt seccomp=unconfined
+     -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+     -v ${env.LLM_ROOT_PATH}/ollama:/models/ollama
+     ${env.REGISTRY}/${env.IMAGE_NAMESPACE}/llama-cpp-spark:latest
+     -m /models/ollama/HauhauCS/Qwen3.5-27B-Uncensored-HauhauCS-Aggressive/Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-BF16.gguf
+     --port ${PORT} --host ${host}
+     --ctx-size 16384 --n-gpu-layers 99 --parallel 4 --no-mmap
+   cmdStop: "docker stop llamacpp-qwen-${PORT}"
 
-#  Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-BF16:
-#    ttl: 600
+#  dolphin-mistral-24b:
+#    ttl: 0
 #    readyTimeout: 300
 #    checkEndpoint: "/health" 
 #    cmd: >
-#      docker run --rm --name llamacpp-qwen-${PORT}
+#      docker run --rm --name llamacpp-dolphin-${PORT}
 #      --runtime nvidia --gpus all --ipc host --network container:llama-swap
-#      --ulimit memlock=-1 --ulimit stack=67108864
-#      --security-opt seccomp=unconfined
 #      -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
-#      -v <LLM_ROOT_PATH>/ollama:/models/ollama
-#      ghcr.io/martin-b78/llama-cpp-spark:latest
-#      -m /models/ollama/Alibaba/Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-Q4_K_M/Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-BF16.gguf
+#      -v ${env.LLM_ROOT_PATH}/ollama:/models/ollama
+#      ${env.REGISTRY}/${env.IMAGE_NAMESPACE}/llama-cpp-spark:latest
+#      -m /models/ollama/YOUR_EXACT_DOLPHIN_FILENAME.gguf  # <--- UPDATE THIS
 #      --port ${PORT} --host ${host}
-#      --ctx-size 16384 --n-gpu-layers 99 --parallel 4 --no-mmap
-#    cmdStop: "docker stop llamacpp-qwen-${PORT}"
-
-
-# dolphin-mistral-24b:
-#   ttl: 600
-#   readyTimeout: 300
-#   checkEndpoint: "/health" 
-#   cmd: >
-#     docker run --rm --name llamacpp-dolphin-${PORT}
-#     --runtime nvidia --gpus all --ipc host --network container:llama-swap
-#     -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
-#     -v <LLM_ROOT_PATH>/ollama:/models/ollama
-#     ghcr.io/martin-b78/llama-cpp-spark:latest
-#     -m /models/ollama/YOUR_EXACT_DOLPHIN_FILENAME.gguf  # <--- UPDATE THIS
-#     --port ${PORT} --host ${host}
-#     --ctx-size 8192 --n-gpu-layers 99 --parallel 1 --no-mmap
-#   cmdStop: "docker stop llamacpp-dolphin-${PORT}"
+#      --ctx-size 8192 --n-gpu-layers 99 --parallel 1 --no-mmap
+#    cmdStop: "docker stop llamacpp-dolphin-${PORT}"
 
 #  "ikiru/dolphin-mistral-24b-venice-edition:latest":
-#    ttl: 600
+#    ttl: 0
 #    checkEndpoint: "/"
 #    cmd: >
-#      docker run --rm --name ollama-dolphin-${PORT} 
-#      --runtime nvidia --gpus all --network container:llama-swap 
-#      -e OLLAMA_HOST=0.0.0.0:${PORT} 
-#      -v <LLM_ROOT_PATH>/ollama:/root/.ollama 
+#      docker run --rm --name ollama-dolphin-${PORT}
+#      --runtime nvidia --gpus all --network container:llama-swap
+#      -e OLLAMA_HOST=0.0.0.0:${PORT}
+#      -v ${env.LLM_ROOT_PATH}/ollama:/root/.ollama
 #      ollama/ollama:latest
 #      serve
 #    cmdStop: "docker stop ollama-dolphin-${PORT}"
 
 # --- Persistent llama.cpp Models ---
-  # Note: These point to your existing server on port 18080
+# Note: These point to your existing server on port 18080
   
 
 #  NVIDIA-Nemotron3-Nano-4B-Q4_K_M:
@@ -262,11 +256,11 @@ models:
   # --- VLLM MODELS ---
   # --- DeepSeek V4 Flash IQ2XXS (DS4 GGUF server) ---
   # Start host server with: ./scripts/start-ds4-deepseek.sh
-  DeepSeek-V4-Flash-IQ2XXS-DS4:
-    cmd: "sleep infinity"
-    proxy: "http://192.168.178.8:18004"
-    checkEndpoint: "none"
-    ttl: 0
+#  DeepSeek-V4-Flash-IQ2XXS-DS4:
+#    cmd: "sleep infinity"
+#    proxy: "http://192.168.178.8:18004"
+#    checkEndpoint: "none"
+#    ttl: 0
 
   # --- spark-arena winner recipe: vllm-node-tf5 + Mamba float16 + large batches ---
   # Adaptive gmem via launch-vllm-auto.sh. Set GMEM_OVERRIDE=0.40 to pin static.
@@ -276,8 +270,8 @@ models:
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/Alibaba/Qwen3.5-35B-A3B-FP8
-      MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3.5-35B-A3B-FP8
+      MODEL_PATH=/models/vllm/Qwen/Qwen3.5-35B-A3B-FP8
+      MODEL_HOST_PATH=/models/vllm/Qwen/Qwen3.5-35B-A3B-FP8
       CONTAINER_NAME=vllm-qwen3.5-35b-${PORT}
       IMAGE=vllm-node-tf5:latest
       PORT=${PORT} HOST=${host}
@@ -285,7 +279,7 @@ models:
       GMEM_MIN=0.40 GMEM_MAX=0.75 SAFETY_GIB=4
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3.5-35B-A3B-FP8
-      --chat-template /models/vllm/Alibaba/Qwen3.5-35B-A3B-FP8/chat_template-tool-strict.jinja
+      --chat-template /models/vllm/Qwen/Qwen3.5-35B-A3B-FP8/chat_template.jinja
       --max-num-batched-tokens 32768
       --max-cudagraph-capture-size 10
       --kv-cache-dtype fp8
@@ -315,18 +309,18 @@ models:
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
-      MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8
+      MODEL_PATH=/models/vllm/Qwen/Qwen3.6-35B-A3B-FP8
+      MODEL_HOST_PATH=/models/vllm/Qwen/Qwen3.6-35B-A3B-FP8
       CONTAINER_NAME=vllm-qwen3.6-35b-${PORT}
       IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=262144 MAX_NUM_SEQS=20 KV_DTYPE_BYTES=1
       GMEM_OVERRIDE=0.7069
       GMEM_MIN=0.55 GMEM_MAX=0.71 SAFETY_GIB=4
-      EXTRA_DOCKER_ARGS='-e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
+      EXTRA_DOCKER_ARGS="-e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4"
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3.6-35B-A3B-FP8 qwen3.6-35b-a3b
-      --chat-template /models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8/chat_template-tool-strict.jinja
+      --chat-template /models/vllm/Qwen/Qwen3.6-35B-A3B-FP8/chat_template.jinja
       --max-num-batched-tokens 32768
       --attention-backend flashinfer
       --kv-cache-dtype fp8
@@ -364,8 +358,8 @@ models:
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/Alibaba/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm
-      MODEL_HOST_PATH=<LLM_ROOT_PATH>/vllm/Alibaba/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm
+      MODEL_PATH=/models/vllm/rdtand/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm
+      MODEL_HOST_PATH=/models/vllm/rdtand/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm
       CONTAINER_NAME=vllm-qwen3.6-27b-${PORT}
       IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
@@ -374,7 +368,7 @@ models:
       EXTRA_DOCKER_ARGS='-e NVIDIA_FORWARD_COMPAT=1 -e VLLM_MARLIN_USE_ATOMIC_ADD=1 -e FLASHINFER_DISABLE_VERSION_CHECK=1 -e TORCH_MATMUL_PRECISION=high -e VLLM_TEST_FORCE_FP8_MARLIN=1 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3.6-27B-PrismaSCOUT-NVFP4 qwen3.6-27b
-      --chat-template /models/vllm/Alibaba/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm/chat_template-tool-strict.jinja
+      --chat-template /models/vllm/rdtand/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm/chat_template.jinja
       --language-model-only
       --max-num-batched-tokens 4096
       --quantization compressed-tensors
@@ -399,12 +393,12 @@ models:
   # garbled/incoherent output (confirmed even at temperature=0, with and
   # without the mods/fix-qwen3.5-hybrid-int4fp8 patches). The checkpoint
   # itself likely needs to be rebuilt. See the launch script's comments.
-  Qwen3.5-122B-A10B-hybrid-int4fp8:
-    ttl: 0
-    readyTimeout: 1800
-    checkEndpoint: "/health"
-    cmd: /app/scripts/launch-qwen35-122b-hybrid.sh ${PORT} ${host}
-    cmdStop: "docker stop vllm-qwen3.5-122b-hybrid-${PORT}"
+  #Qwen3.5-122B-A10B-hybrid-int4fp8:
+  #  ttl: 0
+  #  readyTimeout: 1800
+  #  checkEndpoint: "/health"
+  #  cmd: /app/scripts/launch-qwen35-122b-hybrid.sh ${PORT} ${host}
+  #  cmdStop: "docker stop vllm-qwen3.5-122b-hybrid-${PORT}"
 
   Qwen3.5-122B-A10B-int4-AutoRound:
     ttl: 0
@@ -420,8 +414,8 @@ models:
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/Alibaba/Qwen3-VL-30B-A3B-Instruct-FP8
-      MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3-VL-30B-A3B-Instruct-FP8
+      MODEL_PATH=/models/vllm/Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+      MODEL_HOST_PATH=/models/vllm/Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
       CONTAINER_NAME=vllm-qwen3-vl-${PORT}
       IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
@@ -429,7 +423,6 @@ models:
       GMEM_MIN=0.40 GMEM_MAX=0.65 SAFETY_GIB=4
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3-VL-30B-A3B-Instruct-FP8
-      --chat-template /models/vllm/Alibaba/Qwen3-VL-30B-A3B-Instruct-FP8/chat_template-tool-strict.jinja
       --trust-remote-code
       --limit-mm-per-prompt '{"image": 2}'
       --kv-cache-dtype fp8
@@ -444,33 +437,34 @@ models:
   # Qwen3-Omni 30B BF16 multimodal — weights ~60 GiB, KV ~6 GiB at 32K.
   # Static --gpu-memory-utilization 0.40 (~49 GiB) was below weights → KV ValueError.
   # Switched to launch-vllm-auto.sh: GMEM_MIN=0.60, GMEM_MAX=0.75.
-  Qwen3-Omni-30B-A3B-Instruct:
-    ttl: 0
-    readyTimeout: 600
-    checkEndpoint: "/health"
-    cmd: >
-      env
-      MODEL_PATH=/models/vllm/Alibaba/Qwen3-Omni-30B-A3B-Instruct
-      MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3-Omni-30B-A3B-Instruct
-      CONTAINER_NAME=vllm-qwen3-omni-${PORT}
-      IMAGE=vllm-node:latest
-      PORT=${PORT} HOST=${host}
-      MAX_MODEL_LEN=32768 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=2
-      GMEM_MIN=0.60 GMEM_MAX=0.75 SAFETY_GIB=6
-      /app/scripts/launch-vllm-auto.sh
-      --served-model-name Qwen3-Omni-30B-A3B-Instruct
-      --chat-template /models/vllm/Alibaba/Qwen3-Omni-30B-A3B-Instruct/chat_template-tool-strict.jinja
-      --trust-remote-code
-      --limit-mm-per-prompt '{"image": 2, "audio": 2}'
-      --load-format fastsafetensors
-      --enable-prefix-caching
-      --tensor-parallel-size ${tensor_parallel}
-      --enable-auto-tool-choice
-      --tool-call-parser hermes
-     # USE ONLY THIS PARSER FOR OMNI:
-     # REMOVE --reasoning-parser qwen3
-    cmdStop: "docker stop vllm-qwen3-omni-${PORT}"
-
+  #
+  # BROKEN (vllm-node:latest, June-2026 build): meta tensor device mismatch in
+  # qwen3_omni_moe_thinker.py during _dummy_run memory profiling. A positional
+  # buffer stays on meta device and crashes prims.add at forward:1121. Neither
+  # --enforce-eager, --load-format auto, nor limit-mm-per-prompt workarounds help.
+#  Qwen3-Omni-30B-A3B-Instruct:
+#    ttl: 0
+#    readyTimeout: 600
+#    checkEndpoint: "/health"
+#    cmd: >
+#      env
+#      MODEL_PATH=/models/vllm/Qwen/Qwen3-Omni-30B-A3B-Instruct
+#      MODEL_HOST_PATH=/models/vllm/Qwen/Qwen3-Omni-30B-A3B-Instruct
+#      CONTAINER_NAME=vllm-qwen3-omni-${PORT}
+#      IMAGE=vllm-node:latest
+#      PORT=${PORT} HOST=${host}
+#      MAX_MODEL_LEN=32768 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=2
+#      GMEM_MIN=0.60 GMEM_MAX=0.75 SAFETY_GIB=6
+#      /app/scripts/launch-vllm-auto.sh
+#      --served-model-name Qwen3-Omni-30B-A3B-Instruct
+#      --trust-remote-code
+#      --limit-mm-per-prompt '{"image": 2, "audio": 2}'
+#      --load-format fastsafetensors
+#      --enable-prefix-caching
+#      --tensor-parallel-size ${tensor_parallel}
+#      --enable-auto-tool-choice
+#      --tool-call-parser hermes
+#    cmdStop: "docker stop vllm-qwen3-omni-${PORT}"
 
   # --- is for Coding (Qwen3-Next ~480B-A22B, FP8 Dynamic) ---
   # Weights ≈ 77.8 GiB. Static gmem 0.90 (109 GiB) failed when free VRAM
@@ -503,18 +497,18 @@ models:
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/Alibaba/Qwen3-Coder-Next-FP8-Dynamic
-      MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3-Coder-Next-FP8-Dynamic
+      MODEL_PATH=/models/vllm/unsloth/Qwen3-Coder-Next-FP8-Dynamic
+      MODEL_HOST_PATH=/models/vllm/unsloth/Qwen3-Coder-Next-FP8-Dynamic
       CONTAINER_NAME=vllm-qwen3-coder-${PORT}
       IMAGE=vllm-node-tf5:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=131072 MAX_NUM_SEQS=4 KV_DTYPE_BYTES=1
       GMEM_MIN=0.73 GMEM_MAX=0.92 SAFETY_GIB=8
-      EXTRA_DOCKER_ARGS='-e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro'
+      EXTRA_DOCKER_ARGS="-e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -v ${env.REPO_CONFIG_PATH}/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro"
       PRE_LAUNCH_CMD='cd /mod && bash run.sh'
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3-Coder-Next-FP8-Dynamic
-      --chat-template /models/vllm/Alibaba/Qwen3-Coder-Next-FP8-Dynamic/chat_template-tool-strict.jinja
+      --chat-template /models/vllm/unsloth/Qwen3-Coder-Next-FP8-Dynamic/chat_template.jinja
       --kv-cache-dtype fp8
       --load-format fastsafetensors
       --attention-backend flashinfer
@@ -523,7 +517,6 @@ models:
       --max-num-batched-tokens 16384
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
-     # NOTE: no --reasoning-parser (Coder-Next doesn't expose <think> in standard mode)
     cmdStop: "docker stop vllm-qwen3-coder-${PORT}"
 
   # --- Optimized: INT4 AutoRound, spark-arena v2 recipe ---
@@ -542,18 +535,18 @@ models:
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/Alibaba/Qwen3-Coder-Next-int4-AutoRound
-      MODEL_HOST_PATH=/models/vllm/Alibaba/Qwen3-Coder-Next-int4-AutoRound
+      MODEL_PATH=/models/vllm/Intel/Qwen3-Coder-Next-int4-AutoRound
+      MODEL_HOST_PATH=/models/vllm/Intel/Qwen3-Coder-Next-int4-AutoRound
       CONTAINER_NAME=vllm-qwen3-coder-ar-${PORT}
       IMAGE=vllm-node-tf5:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=32768 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
       GMEM_MIN=0.55 GMEM_MAX=0.85 SAFETY_GIB=6
-      EXTRA_DOCKER_ARGS='-e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -e SAFETENSORS_FAST_GPU=1 -e VLLM_USE_FLASHINFER_MOE_FP8=1 -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro'
+      EXTRA_DOCKER_ARGS="-e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -e SAFETENSORS_FAST_GPU=1 -e VLLM_USE_FLASHINFER_MOE_FP8=1 -v ${env.REPO_CONFIG_PATH}/vllm/build/spark-vllm-docker/mods/fix-qwen3-next-autoround:/mod:ro"
       PRE_LAUNCH_CMD='cd /mod && bash run.sh'
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3-Coder-Next-int4-AutoRound
-      --chat-template /models/vllm/Alibaba/Qwen3-Coder-Next-int4-AutoRound/chat_template-tool-strict.jinja
+      --chat-template /models/vllm/Intel/Qwen3-Coder-Next-int4-AutoRound/chat_template.jinja
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
       --load-format fastsafetensors
@@ -563,31 +556,29 @@ models:
       --kv-cache-dtype fp8
       --optimization-level 3
       --performance-mode throughput
-     # REMOVE --reasoning-parser qwen3
     cmdStop: "docker stop vllm-qwen3-coder-ar-${PORT}"
 
-# --- Instant Orchestrator - Blackwell Optimized FP8 ---
+  # --- Instant Orchestrator - Blackwell Optimized FP8 ---
   Nemotron-3-Nano-4B-FP8:
     ttl: 0
     readyTimeout: 300
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-4B-FP8
-      MODEL_HOST_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-4B-FP8
+      MODEL_PATH=/models/vllm/nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8
+      MODEL_HOST_PATH=/models/vllm/nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8
       CONTAINER_NAME=vllm-nano4b-${PORT}
       IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=8192 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
-      GMEM_MIN=0.10 GMEM_MAX=0.40 SAFETY_GIB=2
+      GMEM_MIN=0.15 GMEM_MAX=0.40 SAFETY_GIB=2
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Nemotron-3-Nano-4B-FP8
-      --chat-template /models/vllm/Nvidia/Nemotron-3-Nano-4B-FP8/chat_template-tool-strict.jinja
+      --chat-template /models/vllm/nvidia/NVIDIA-Nemotron-3-Nano-4B-FP8/chat_template.jinja
       --kv-cache-dtype fp8
       --enforce-eager
       --trust-remote-code
       --load-format fastsafetensors
-      --enable-prefix-caching
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
       --reasoning-parser nemotron_v3
@@ -600,8 +591,8 @@ models:
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
-      MODEL_HOST_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
+      MODEL_PATH=/models/vllm/nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
+      MODEL_HOST_PATH=/models/vllm/nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
       CONTAINER_NAME=vllm-nemotron-${PORT}
       IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
@@ -609,7 +600,7 @@ models:
       GMEM_MIN=0.40 GMEM_MAX=0.70 SAFETY_GIB=4
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Nemotron-3-Nano-30B-A3B-NVFP4
-      --chat-template /models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/chat_template-tool-strict.jinja
+      --chat-template /models/vllm/nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af/chat_template.jinja
       --kv-cache-dtype fp8
       --moe-backend cutlass
       --load-format fastsafetensors
@@ -617,43 +608,43 @@ models:
       --enable-prefix-caching
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
-      --reasoning-parser-plugin /models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/nano_v3_reasoning_parser.py
+      --reasoning-parser-plugin /models/vllm/nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af/nano_v3_reasoning_parser.py
       --reasoning-parser nano_v3
     cmdStop: "docker stop vllm-nemotron-${PORT}"
 
-# --- NVIDIA Nemotron-3 Nano-Omni (30B MoE multimodal: text+image+audio, FP8) ---
-# Adaptive --gpu-memory-utilization via launch-vllm-auto.sh.
-# Hard ceiling 0.55 because the previous static 0.5 + multimodal preprocessor
-# (image/audio encoders, video pruning buffers) drove total RAM past 125 GiB
-# and crashed the GB10 unified pool. Tight ceiling + smaller batch profile.
-#  Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8:
-#    ttl: 600
-#    readyTimeout: 1200
-#    checkEndpoint: "/health"
-#    cmd: >
-#      env
-#      MODEL_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8
-#      MODEL_HOST_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8
-#      CONTAINER_NAME=vllm-nano-omni-${PORT}
-#      IMAGE=spark-vllm-mamba:latest
-#      PORT=${PORT} HOST=${host}
-#      MAX_MODEL_LEN=32768 MAX_NUM_SEQS=16 KV_DTYPE_BYTES=1
-#      GMEM_MIN=0.45 GMEM_MAX=0.55 SAFETY_GIB=8
-#      /app/scripts/launch-vllm-auto.sh
-#      --served-model-name Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8
-#      --chat-template /models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8/chat_template.jinja
-#      --max-num-batched-tokens 8192
-#      --kv-cache-dtype fp8
-#      --load-format fastsafetensors
-#      --trust-remote-code
-#      --video-pruning-rate 0.5
-#      --allowed-local-media-path /
-#      --enable-prefix-caching
-#      --limit-mm-per-prompt '{"image": 2, "audio": 1}'
-#      --enable-auto-tool-choice
-#      --tool-call-parser qwen3_coder
-#      --reasoning-parser nemotron_v3
-#    cmdStop: "docker stop vllm-nano-omni-${PORT}"
+  # --- NVIDIA Nemotron-3 Nano-Omni (30B MoE multimodal: text+image+audio, FP8) ---
+  # Adaptive --gpu-memory-utilization via launch-vllm-auto.sh.
+  # Hard ceiling 0.55 because the previous static 0.5 + multimodal preprocessor
+  # (image/audio encoders, video pruning buffers) drove total RAM past 125 GiB
+  # and crashed the GB10 unified pool. Tight ceiling + smaller batch profile.
+  #Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8:
+  # ttl: 0
+  # readyTimeout: 1200
+  # checkEndpoint: "/health"
+  # cmd: >
+  #   env
+  #   MODEL_PATH=/models/vllm/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8
+  #   MODEL_HOST_PATH=/models/vllm/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8
+  #   CONTAINER_NAME=vllm-nano-omni-${PORT}
+  #   IMAGE=spark-vllm-mamba:latest
+  #   PORT=${PORT} HOST=${host}
+  #   MAX_MODEL_LEN=32768 MAX_NUM_SEQS=16 KV_DTYPE_BYTES=1
+  #   GMEM_MIN=0.45 GMEM_MAX=0.55 SAFETY_GIB=8
+  #   /app/scripts/launch-vllm-auto.sh
+  #   --served-model-name Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8
+  #   --chat-template /models/vllm/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8/chat_template.jinja
+  #   --max-num-batched-tokens 8192
+  #   --kv-cache-dtype fp8
+  #   --load-format fastsafetensors
+  #   --trust-remote-code
+  #   --video-pruning-rate 0.5
+  #   --allowed-local-media-path /
+  #   --enable-prefix-caching
+  #   --limit-mm-per-prompt '{"image": 2, "audio": 1}'
+  #   --enable-auto-tool-choice
+  #   --tool-call-parser qwen3_coder
+  #   --reasoning-parser nemotron_v3
+  # cmdStop: "docker stop vllm-nano-omni-${PORT}"
 
   # --- NVIDIA Nemotron-3 Nano-Omni (30B MoE multimodal: text+image+audio, NVFP4) ---
   # Optimized settings from Spark Arena Benchmark & NVIDIA Forums
@@ -671,17 +662,17 @@ models:
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
-      MODEL_HOST_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+      MODEL_PATH=/models/vllm/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+      MODEL_HOST_PATH=/models/vllm/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
       CONTAINER_NAME=vllm-nano-omni-nvfp4-${PORT}
       IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=131072 MAX_NUM_SEQS=8 KV_DTYPE_BYTES=1
       GMEM_MIN=0.65 GMEM_MAX=0.85 SAFETY_GIB=8
-      EXTRA_DOCKER_ARGS='-e VLLM_NVFP4_GEMM_BACKEND=marlin -e VLLM_USE_FLASHINFER_MOE_FP4=0 -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -e CUDA_MANAGED_FORCE_DEVICE_ALLOC=1 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
+      EXTRA_DOCKER_ARGS="-e VLLM_NVFP4_GEMM_BACKEND=marlin -e VLLM_USE_FLASHINFER_MOE_FP4=0 -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 -e CUDA_MANAGED_FORCE_DEVICE_ALLOC=1 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4"
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 nemotron-3-nano-omni-nvfp4
-      --chat-template /models/vllm/Nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4/chat_template.jinja
+      --chat-template /models/vllm/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4/chat_template.jinja
       --max-num-batched-tokens 32768
       --quantization fp4
       --moe-backend marlin
@@ -698,25 +689,25 @@ models:
       --trust-remote-code
     cmdStop: "docker stop vllm-nano-omni-nvfp4-${PORT}"
 
-# --- NVIDIA Nemotron-3 Super (120B MoE - Blackwell Optimized NVFP4) ---
-# Adaptive gmem (GMEM_MAX=0.85 ceiling — large 120B model needs the headroom).
+  # --- NVIDIA Nemotron-3 Super (120B MoE - Blackwell Optimized NVFP4) ---
+  # Adaptive gmem (GMEM_MAX=0.85 ceiling — large 120B model needs the headroom).
   Nemotron-3-Super-120B-A12B-NVFP4:
     ttl: 0
     readyTimeout: 1800
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/Nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
-      MODEL_HOST_PATH=/models/vllm/Nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+      MODEL_PATH=/models/vllm/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+      MODEL_HOST_PATH=/models/vllm/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
       CONTAINER_NAME=vllm-nemotron-super-${PORT}
       IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=131072 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
       GMEM_MIN=0.65 GMEM_MAX=0.85 SAFETY_GIB=6
-      EXTRA_DOCKER_ARGS='--shm-size=64g -e VLLM_FLASHINFER_ALLREDUCE_BACKEND=trtllm -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e RAY_memory_monitor_refresh_ms=0'
+      EXTRA_DOCKER_ARGS="--shm-size=64g -e VLLM_FLASHINFER_ALLREDUCE_BACKEND=trtllm -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 -e RAY_memory_monitor_refresh_ms=0"
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Nemotron-3-Super-120B-A12B-NVFP4
-      --chat-template /models/vllm/Nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4/chat_template-tool-strict.jinja
+      --chat-template /models/vllm/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4/chat_template.jinja
       --tensor-parallel-size ${tensor_parallel}
       --kv-cache-dtype fp8
       --moe-backend cutlass
@@ -730,27 +721,26 @@ models:
       --attention-backend TRITON_ATTN
       --distributed-executor-backend ray
     cmdStop: "docker stop vllm-nemotron-super-${PORT}"
- #    --max-model-len 262144
 
   # --- spark-arena winner recipe + exp-mxfp4 CUTLASS build ---
-  # Adaptive gmem (GMEM_MAX=0.85). Templates dir mounted via EXTRA_DOCKER_ARGS.
+  # Adaptive gmem (GMEM_MAX=0.85). Chat template loaded from model snapshot dir.
   GPT-OSS-120B:
     ttl: 0
     readyTimeout: 1200
     checkEndpoint: "/health"
     cmd: >
       env
-      MODEL_PATH=/models/vllm/OpenAI/GPT-OSS-120B/hub/models--openai--gpt-oss-120b/snapshots/b5c939de8f754692c1647ca79fbf85e8c1e70f8a
-      MODEL_HOST_PATH=/models/vllm/OpenAI/GPT-OSS-120B/hub/models--openai--gpt-oss-120b/snapshots/b5c939de8f754692c1647ca79fbf85e8c1e70f8a
+      MODEL_PATH=/models/vllm/openai/GPT-OSS-120B/hub/models--openai--gpt-oss-120b/snapshots/b5c939de8f754692c1647ca79fbf85e8c1e70f8a
+      MODEL_HOST_PATH=/models/vllm/openai/GPT-OSS-120B/hub/models--openai--gpt-oss-120b/snapshots/b5c939de8f754692c1647ca79fbf85e8c1e70f8a
       CONTAINER_NAME=vllm-gptoss-${PORT}
       IMAGE=vllm-node-mxfp4
       PORT=${PORT} HOST=${host}
       MAX_MODEL_LEN=65536 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
       GMEM_MIN=0.65 GMEM_MAX=0.85 SAFETY_GIB=6
-      EXTRA_DOCKER_ARGS='-e VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=1 -v <LLM_ROOT_PATH>/vllm/OpenAI/GPT-OSS-120B-templates:/templates:ro'
+      EXTRA_DOCKER_ARGS="-e VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=1"
       /app/scripts/launch-vllm-auto.sh
       --served-model-name GPT-OSS-120B
-      --chat-template /templates/chat_template-tool-strict.jinja
+      --chat-template /models/vllm/openai/GPT-OSS-120B/hub/models--openai--gpt-oss-120b/snapshots/b5c939de8f754692c1647ca79fbf85e8c1e70f8a/chat_template.jinja
       --tensor-parallel-size ${tensor_parallel}
       --load-format fastsafetensors
       --quantization mxfp4
@@ -766,31 +756,31 @@ models:
     cmdStop: "docker stop vllm-gptoss-${PORT}"
 
   # --- Works - is for fast Roleplay or Text based Stuff ---
- # Mistral-Small-24B-Instruct-2501:
- #   ttl: 600
- #   readyTimeout: 600
- #   checkEndpoint: "/health"
- #   cmd: >
- #     docker run --rm --name vllm-mistral-small-${PORT}
- #     --runtime nvidia --gpus all --ipc=host --network container:llama-swap
- #     -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
- #     -v <LLM_ROOT_PATH>/vllm:/models/vllm 
- #     vllm-node:latest
- #     vllm serve /models/vllm/Mistral/Mistral-Small-24B-Instruct-2501
- #     --served-model-name Mistral-Small-24B-Instruct-2501
- #     --host ${host} --port ${PORT}
- #     --gpu-memory-utilization 0.40
- #     --max-model-len 32768
- #     --trust-remote-code
- #     --tensor-parallel-size ${tensor_parallel}
- #     --enforce-eager
- #     --enable-auto-tool-choice
- #     --tool-call-parser mistral
- #   cmdStop: "docker stop vllm-mistral-small-${PORT}"
+  Mistral-Small-24B-Instruct-2501:
+    ttl: 0
+    readyTimeout: 900
+    checkEndpoint: "/health"
+    cmd: >
+      docker run --rm --name vllm-mistral-small-${PORT}
+      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
+      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
+      -v ${env.LLM_ROOT_PATH}/vllm:/models/vllm
+      vllm-node:latest
+      vllm serve /models/vllm/mistralai/Mistral-Small-24B-Instruct-2501
+      --served-model-name Mistral-Small-24B-Instruct-2501
+      --host ${host} --port ${PORT}
+      --gpu-memory-utilization 0.42
+      --max-model-len 32768
+      --trust-remote-code
+      --tensor-parallel-size ${tensor_parallel}
+      --enforce-eager
+      --enable-auto-tool-choice
+      --tool-call-parser mistral
+    cmdStop: "docker stop vllm-mistral-small-${PORT}"
 
-  # --- Work in progress vllm version Leads to crash cause not enough RAM ---
+# --- Work in progress vllm version Leads to crash cause not enough RAM ---
 #  MiniMax-M2.5-BF16-INT4-AWQ:
-#    ttl: 600
+#    ttl: 0
 #    cmd: >
 #      docker run --rm --name vllm-minimax-${PORT} 
 #      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
@@ -798,8 +788,8 @@ models:
 #      -e VLLM_WORKER_MULTIPROC_METHOD=spawn
 #      -e VLLM_FLASHINFER_FORCE_TENSOR_CORES=1
 #      -e PYTORCH_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
-#      -v <LLM_ROOT_PATH>/vllm:/models/vllm 
-#      -v <HOME>/.cache/huggingface:/root/.cache/huggingface
+#      -v ${env.LLM_ROOT_PATH}/vllm:/models/vllm
+#      -v ${env.HOST_HOME}/.cache/huggingface:/root/.cache/huggingface
 #      vllm-node:latest
 #      vllm serve /models/vllm/MiniMax/Minimax-M2.5-BF16-INT4-AWQ
 #      --served-model-name Minimax-M2.5-BF16-INT4-AWQ
@@ -815,32 +805,32 @@ models:
 #      --kv-cache-dtype fp8
 #    cmdStop: "docker stop vllm-minimax-${PORT}"
 
-  # --- Work in progress SGLang's Leads to crash cause not enough RAM---
+# --- Work in progress SGLang's Leads to crash cause not enough RAM---
 #  MiniMax-M2.5-BF16-INT4-AWQ:
-    # Time in seconds before llama-swap shuts down the model due to inactivity
-#    ttl: 600     # Note: ${PORT} is dynamically injected by llama-swap
-   # The command to dynamically spin up the SGLang container
+#    # Time in seconds before llama-swap shuts down the model due to inactivity
+#    ttl: 0     # Note: ${PORT} is dynamically injected by llama-swap
+#    # The command to dynamically spin up the SGLang container
 #    cmd: >
 #      docker run --rm --name sglang-minimax-${PORT} 
 #      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
 #      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
 #      -e PYTORCH_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
-#      -v <LLM_ROOT_PATH>/vllm:/models/vllm 
-#      -v <HOME>/.cache/huggingface:/root/.cache/huggingface
+#      -v ${env.LLM_ROOT_PATH}/vllm:/models/vllm
+#      -v ${env.HOST_HOME}/.cache/huggingface:/root/.cache/huggingface
 #      lmsysorg/sglang:latest
 #      bash -c "pip install flashinfer-python==0.6.3 --no-deps && python3 -m sglang.launch_server --model-path /models/vllm/MiniMax/Minimax-M2.5-BF16-INT4-AWQ --served-model-name Minimax-M2.5-BF16-INT4-AWQ --host ${host} --port ${PORT} --trust-remote-code --tp ${tensor_parallel}  --attention-backend flashinfer --mem-fraction-static 0.93 --disable-custom-all-reduce --max-running-requests 64 --cuda-graph-max-bs 64 --tool-call-parser minimax-m2 --reasoning-parser minimax" 
-    # The command llama-swap uses to cleanly tear down the container
+#    # The command llama-swap uses to cleanly tear down the container
 #    cmdStop: "docker stop sglang-minimax-${PORT}"
 
-  # --- Work in progress ---
+# --- Work in progress ---
 #  MiniMax-M2.5-REAP-172B-A10B-NVFP4-GB10:
-#    ttl: 600
+#    ttl: 0
 #    cmd: >
 #      docker run --rm --name vllm-minimax-${PORT} 
 #      --runtime nvidia --gpus all --ipc=host --network container:llama-swap --shm-size=64g
 #      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
-#      -v <LLM_ROOT_PATH>/vllm:/models/vllm 
-#      -v <HOME>/.cache/huggingface:/root/.cache/huggingface
+#      -v ${env.LLM_ROOT_PATH}/vllm:/models/vllm
+#      -v ${env.HOST_HOME}/.cache/huggingface:/root/.cache/huggingface
 #      vllm-node:latest
 #      vllm serve /models/vllm/MiniMax/MiniMax-M2.5-REAP-172B-A10B-NVFP4-GB10
 #      --served-model-name Minimax-M2.5-BF16-INT4-AWQ
@@ -852,15 +842,15 @@ models:
 #      --max-model-len 8192
 #    cmdStop: "docker stop vllm-minimax-${PORT}"
 
-  # --- Work in progress CRASHING ---
+# --- Work in progress CRASHING ---
 #  GLM-4.6-V:
-#    ttl: 1200
+#    ttl: 0
 #    readyTimeout: 1200
 #    cmd: >
 #      docker run --rm --name vllm-glm46v-${PORT} 
 #      --runtime nvidia --gpus all --ipc=host --network container:llama-swap
 #      -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1
-#      -v <LLM_ROOT_PATH>/vllm:/models/vllm 
+#      -v ${env.LLM_ROOT_PATH}/vllm:/models/vllm
 #      vllm-node-tf5
 #      vllm serve /models/vllm/Z.ai/GLM-4.6-V
 #      --served-model-name GLM-4.6-V
@@ -880,9 +870,9 @@ models:
 # --- OLLAMA MODELS ---
 
 #  TheDrummer_GLM-Steam-GGUF:
-#    ttl: 600
+#    ttl: 0
 #    cmd: >
 #      OLLAMA_HOST=${host}:${PORT} 
-#      OLLAMA_MODELS=<LLM_ROOT_PATH>/ollama 
+#      OLLAMA_MODELS=${env.LLM_ROOT_PATH}/ollama
 #      ollama serve
 #    cmdStop: "kill $(lsof -t -i:${PORT})"

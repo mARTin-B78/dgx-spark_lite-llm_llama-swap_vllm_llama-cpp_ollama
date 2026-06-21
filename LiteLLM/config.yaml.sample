@@ -3,7 +3,7 @@ general_settings:
   # ===================================================
   # 🛡️ SECURITY & ADMIN UI
   # ===================================================
-  master_key: "sk-your-litellm-master-key" 
+  # master_key: "sk-your-litellm-master-key"
   ui_username: "admin"
   ui_password: "your-secure-ui-password"
   ui_access_mode: "admin_only"
@@ -24,7 +24,7 @@ model_list:
       model: auto_router/complexity_router
       complexity_router_config:
         tiers:
-          SIMPLE: Qwen3.5-4B-Q4_K_M
+          # SIMPLE: Qwen3.5-4B-Q4_K_M
           MEDIUM: Qwen3.6-27B-PrismaSCOUT-NVFP4
           COMPLEX: Qwen3.6-35B-A3B-FP8
           REASONING: Qwen3.5-122B-A10B-int4-AutoRound
@@ -39,142 +39,151 @@ model_list:
 
   # Semantic intent router. Requires an embedding model/key; set OPENAI_API_KEY
   # in .env/docker-compose if you want to call model="semantic-router".
-  - model_name: semantic-router
-    litellm_params:
-      model: auto_router/auto_router_1
-      auto_router_config: |
-        {
-          "routes": [
-            {
-              "name": "Qwen3-Coder-Next-FP8-Dynamic",
-              "description": "Coding, debugging, refactoring, and software architecture",
-              "score_threshold": 0.72,
-              "utterances": [
-                "write code for [task]",
-                "debug this error",
-                "explain this stack trace",
-                "refactor this function",
-                "design a software architecture",
-                "optimize this database query",
-                "create a docker compose file",
-                "fix this python script",
-                "help me with a React component"
-              ],
-              "function_schemas": null,
-              "llm": null,
-              "metadata": {}
-            },
-            {
-              "name": "Qwen3.5-122B-A10B-int4-AutoRound",
-              "description": "Deep reasoning, planning, math, analysis, and hard multi-step tasks",
-              "score_threshold": 0.72,
-              "utterances": [
-                "think step by step",
-                "reason carefully through this problem",
-                "solve this math proof",
-                "analyze these tradeoffs",
-                "make a detailed plan",
-                "evaluate multiple options",
-                "explain the implications",
-                "derive the formula",
-                "find the hidden assumption"
-              ],
-              "function_schemas": null,
-              "llm": null,
-              "metadata": {}
-            },
-            {
-              "name": "Qwen3-VL-30B-A3B-Instruct-FP8",
-              "description": "Vision and image-understanding requests",
-              "score_threshold": 0.7,
-              "utterances": [
-                "what is in this image",
-                "describe this picture",
-                "read the text in this screenshot",
-                "analyze this chart",
-                "compare these images",
-                "extract information from this photo"
-              ],
-              "function_schemas": null,
-              "llm": null,
-              "metadata": {}
-            },
-            {
-              "name": "Qwen3.6-35B-A3B-FP8",
-              "description": "General complex answers that need a larger text model",
-              "score_threshold": 0.74,
-              "utterances": [
-                "write a long detailed answer",
-                "summarize this long document",
-                "compare these technical choices",
-                "explain this complex topic",
-                "create a comprehensive guide",
-                "help me make a decision with pros and cons"
-              ],
-              "function_schemas": null,
-              "llm": null,
-              "metadata": {}
-            }
-          ]
-        }
-      auto_router_default_model: Qwen3.5-4B-Q4_K_M
-      auto_router_embedding_model: text-embedding-3-small
+  # - model_name: semantic-router
+  #   litellm_params:
+  #     model: auto_router/auto_router_1
+  #     auto_router_config: |
+  #       {
+  #         "routes": [
+  #           {
+  #             "name": "Qwen3-Coder-Next-FP8-Dynamic",
+  #             "description": "Coding, debugging, refactoring, and software architecture",
+  #             "score_threshold": 0.72,
+  #             "utterances": [
+  #               "write code for [task]",
+  #               "debug this error",
+  #               "explain this stack trace",
+  #               "refactor this function",
+  #               "design a software architecture",
+  #               "optimize this database query",
+  #               "create a docker compose file",
+  #               "fix this python script",
+  #               "help me with a React component"
+  #             ],
+  #             "function_schemas": null,
+  #             "llm": null,
+  #             "metadata": {}
+  #           },
+  #           {
+  #             "name": "Qwen3.5-122B-A10B-int4-AutoRound",
+  #             "description": "Deep reasoning, planning, math, analysis, and hard multi-step tasks",
+  #             "score_threshold": 0.72,
+  #             "utterances": [
+  #               "think step by step",
+  #               "reason carefully through this problem",
+  #               "solve this math proof",
+  #               "analyze these tradeoffs",
+  #               "make a detailed plan",
+  #               "evaluate multiple options",
+  #               "explain the implications",
+  #               "derive the formula",
+  #               "find the hidden assumption"
+  #             ],
+  #             "function_schemas": null,
+  #             "llm": null,
+  #             "metadata": {}
+  #           },
+  #           {
+  #             "name": "Qwen3-VL-30B-A3B-Instruct-FP8",
+  #             "description": "Vision and image-understanding requests",
+  #             "score_threshold": 0.7,
+  #             "utterances": [
+  #               "what is in this image",
+  #               "describe this picture",
+  #               "read the text in this screenshot",
+  #               "analyze this chart",
+  #               "compare these images",
+  #               "extract information from this photo"
+  #             ],
+  #             "function_schemas": null,
+  #             "llm": null,
+  #             "metadata": {}
+  #           },
+  #           {
+  #             "name": "Qwen3.6-35B-A3B-FP8",
+  #             "description": "General complex answers that need a larger text model",
+  #             "score_threshold": 0.74,
+  #             "utterances": [
+  #               "write a long detailed answer",
+  #               "summarize this long document",
+  #               "compare these technical choices",
+  #               "explain this complex topic",
+  #               "create a comprehensive guide",
+  #               "help me make a decision with pros and cons"
+  #             ],
+  #             "function_schemas": null,
+  #             "llm": null,
+  #             "metadata": {}
+  #           }
+  #         ]
+  #       }
+  #     auto_router_default_model: Qwen3.5-4B-Q4_K_M
+  #     auto_router_embedding_model: text-embedding-3-small
 
-  - model_name: text-embedding-3-small
-    litellm_params:
-      model: openai/text-embedding-3-small
-      api_key: os.environ/OPENAI_API_KEY
+  # - model_name: text-embedding-3-small
+  #   litellm_params:
+  #     model: openai/text-embedding-3-small
+  #     api_key: os.environ/OPENAI_API_KEY
 
   # ===================================================
   # 🦙 LLAMA-CPP MODELS (DGX Local)
   # ===================================================
 
-  - model_name: Qwen3.5-4B-Q4_K_M
+  - model_name: Nemotron-3-Nano-4B-Q4_K_M-GGUF
     litellm_params:
-      model: openai/Qwen3.5-4B-Q4_K_M
-      api_base: "http://llama-qwen35-4b:19001/v1"
-      api_key: "sk-your-litellm-master-key"
-      max_tokens: 4096
-      drop_params: true
-      extra_body:
-        enable_thinking: false
-        chat_template_kwargs: {"enable_thinking": false}
+      model: openai/Nemotron-3-Nano-4B-Q4_K_M-GGUF
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "no-key"
 
-#  - model_name: Nemotron-3-Nano-4B-Q4_K_M-GGUF
-#    litellm_params:
-#      model: openai/Nemotron-3-Nano-4B-Q4_K_M-GGUF 
-#      api_base: "http://ollama:11434/v1"
-#    # api_base: "http://llama-swap:8080/v1"
-#      api_key: "sk-your-litellm-master-key"
+  # - model_name: Qwen3.5-4B-Q4_K_M
+  #   litellm_params:
+  #     model: openai/Qwen3.5-4B-Q4_K_M
+  #     api_base: "http://llama-qwen35-4b:19001/v1"
+  #     api_key: "sk-your-litellm-master-key"
+  #     max_tokens: 4096
+  #     drop_params: true
+  #     extra_body:
+  #       enable_thinking: false
+  #       chat_template_kwargs: {"enable_thinking": false}
 
-#  - model_name: GLM-Steam-106B-A12B-v1-Q4_K_M-GGUF
-#    litellm_params:
-#      model: openai/TheDrummer_GLM-Steam-106B-A12B-v1-Q4_K_M-GGUF
-#      api_base: "http://ollama:11434/v1"
-#    # api_base: "http://llama-swap:8080/v1"
-#      api_key: "sk-your-litellm-master-key"
+  - model_name: GLM-Steam-106B-A12B-v1-Q4_K_M-GGUF
+    litellm_params:
+      model: openai/TheDrummer_GLM-Steam-106B-A12B-v1-Q4_K_M-GGUF
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "no-key"
 
   - model_name: Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive
     litellm_params:
       model: openai/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive
-    # api_base: "http://ollama:11434/v1"
+      # api_base: "http://ollama:11434/v1"
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
-   #  max_tokens: 4096
+      api_key: "no-key"
+      # max_tokens: 4096
       max_tokens: 32768
       roles:
         system: "user"
 
- # - model_name: Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-BF16
- #   litellm_params:
- #     model: openai/Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-BF16
- #   # api_base: "http://ollama:11434/v1"
- #     api_base: "http://llama-swap:8080/v1"
- #     api_key: "sk-your-litellm-master-key"
- #  #  max_tokens: 4096
- #     max_tokens: 32768
- #     roles:
- #       system: "user"
+  # --- Qwen3.6-27B uncensored heretic v2 (NVFP4-MLP, llama.cpp, reasoning-budget 1024) ---
+  - model_name: Qwen3.6-27B-uncensored-heretic-NVFP4
+    litellm_params:
+      model: openai/Qwen3.6-27B-uncensored-heretic-NVFP4
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "no-key"
+      include_reasoning: true
+      supports_reasoning: true
+      merge_reasoning_content_in_choices: true
+      max_tokens: 32768
+      roles:
+        system: "user"
+
+  - model_name: Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-BF16
+    litellm_params:
+      model: openai/Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-BF16
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "no-key"
+      max_tokens: 32768
+      roles:
+        system: "user"
 
 
   # ===================================================
@@ -182,29 +191,29 @@ model_list:
   # ===================================================
 
   # --- DeepSeek V4 Flash IQ2XXS (DS4 GGUF server) ---
-  - model_name: DeepSeek-V4-Flash-IQ2XXS-DS4
-    litellm_params:
-      model: openai/DeepSeek-V4-Flash-IQ2XXS-DS4
-      api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
-      drop_params: true
-      include_reasoning: true
-      supports_reasoning: true
-      merge_reasoning_content_in_choices: true
-      max_tokens: 8192
-      extra_body:
-        temperature: 1.0
-        top_p: 1.0
-        thinking: true
+  # - model_name: DeepSeek-V4-Flash-IQ2XXS-DS4
+  #   litellm_params:
+  #     model: openai/DeepSeek-V4-Flash-IQ2XXS-DS4
+  #     api_base: "http://llama-swap:8080/v1"
+  #     api_key: "sk-your-litellm-master-key"
+  #     drop_params: true
+  #     include_reasoning: true
+  #     supports_reasoning: true
+  #     merge_reasoning_content_in_choices: true
+  #     max_tokens: 8192
+  #     extra_body:
+  #       temperature: 1.0
+  #       top_p: 1.0
+  #       thinking: true
 
 # --- Qwen 3.5 Series (Native Reasoning) ---
   - model_name: Qwen3.5-35B-A3B-FP8
     litellm_params:
       model: openai/Qwen3.5-35B-A3B-FP8
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key" 
+      api_key: "no-key"
       drop_params: true
-      include_reasoning: true 
+      include_reasoning: true
       supports_reasoning: true
       # This ensures the <think> tags stay in the text stream
       merge_reasoning_content_in_choices: true
@@ -213,44 +222,56 @@ model_list:
         chat_template_kwargs: {"enable_thinking": true}
       max_tokens: 4096 # Changed from 8192 to allow more input tokens
 
-# --- Qwen 3.6 Series ---
+  # --- Qwen 3.6 Series ---
   - model_name: Qwen3.6-35B-A3B-FP8
     litellm_params:
       model: openai/Qwen3.6-35B-A3B-FP8
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
+      api_key: "no-key"
       drop_params: true
       include_reasoning: true
       supports_reasoning: true
       merge_reasoning_content_in_choices: true
       max_tokens: 4096
 
-# --- Qwen 3.5 Series (Heavy thinker Reasoning) ---
+  # --- Qwen 3.6 Series (27B compact) ---
+  - model_name: Qwen3.6-27B-PrismaSCOUT-NVFP4
+    litellm_params:
+      model: openai/Qwen3.6-27B-PrismaSCOUT-NVFP4
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "no-key"
+      drop_params: true
+      include_reasoning: true
+      supports_reasoning: true
+      merge_reasoning_content_in_choices: true
+      max_tokens: 4096
+
+  # --- Qwen 3.5 Series (Heavy thinker Reasoning) ---
   - model_name: Qwen3.5-122B-A10B-int4-AutoRound
     litellm_params:
       model: openai/Qwen3.5-122B-A10B-int4-AutoRound
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
-      include_reasoning: true 
+      api_key: "no-key"
+      include_reasoning: true
       supports_reasoning: true
       merge_reasoning_content_in_choices: false
       max_tokens: 4096 # Changed from 8192 to allow more input tokens
 
   # --- Qwen 3 Series (Omni & Coder Reasoning)(Thinking-based multimodal) ---
-  - model_name: Qwen3-Omni-30B-A3B-Instruct
-    litellm_params:
-      model: openai/Qwen3-Omni-30B-A3B-Instruct
-      api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
-      include_reasoning: true 
-      supports_reasoning: true
-      merge_reasoning_content_in_choices: true
+  # - model_name: Qwen3-Omni-30B-A3B-Instruct
+  #   litellm_params:
+  #     model: openai/Qwen3-Omni-30B-A3B-Instruct
+  #     api_base: "http://llama-swap:8080/v1"
+  #     api_key: "no-key"
+  #     include_reasoning: true
+  #     supports_reasoning: true
+  #     merge_reasoning_content_in_choices: true
 
   - model_name: Qwen3-Coder-Next-FP8-Dynamic
     litellm_params:
       model: openai/Qwen3-Coder-Next-FP8-Dynamic
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
+      api_key: "no-key"
       include_reasoning: true
       supports_reasoning: true
       merge_reasoning_content_in_choices: true
@@ -260,7 +281,7 @@ model_list:
     litellm_params:
       model: openai/Qwen3-Coder-Next-int4-AutoRound
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
+      api_key: "no-key"
       include_reasoning: true
       supports_reasoning: true
       merge_reasoning_content_in_choices: true
@@ -271,16 +292,16 @@ model_list:
     litellm_params:
       model: openai/Qwen3-VL-30B-A3B-Instruct-FP8
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
+      api_key: "no-key"
       include_reasoning: false
       supports_reasoning: false
 
-# --- NVIDIA Nemotron-3 (Instant is for Speed Orchestrator & Fast Chat) ---
+  # --- NVIDIA Nemotron-3 (Instant is for Speed Orchestrator & Fast Chat) ---
   - model_name: Nemotron-3-Nano-4B-FP8
     litellm_params:
       model: openai/Nemotron-3-Nano-4B-FP8
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
+      api_key: "no-key"
       drop_params: true
 
   # --- NVIDIA Nemotron (Hybrid Reasoning Trace) ---
@@ -288,7 +309,7 @@ model_list:
     litellm_params:
       model: openai/Nemotron-3-Nano-30B-A3B-NVFP4
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
+      api_key: "no-key"
       include_reasoning: true
       supports_reasoning: true
       # FIXED: This merges the <think> blocks so the UI doesn't break
@@ -299,7 +320,7 @@ model_list:
   #   litellm_params:
   #     model: openai/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8
   #     api_base: "http://llama-swap:8080/v1"
-  #     api_key: "sk-your-litellm-master-key"
+  #     api_key: "no-key"
   #     include_reasoning: true
   #     supports_reasoning: true
   #     merge_reasoning_content_in_choices: true
@@ -309,17 +330,17 @@ model_list:
     litellm_params:
       model: openai/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
+      api_key: "no-key"
       include_reasoning: true
       supports_reasoning: true
       merge_reasoning_content_in_choices: true
 
-# --- NVIDIA Nemotron-3 Super (Advanced 120B Reasoning & CUTLASS Speed) ---
+  # --- NVIDIA Nemotron-3 Super (Advanced 120B Reasoning & CUTLASS Speed) ---
   - model_name: Nemotron-3-Super-120B-A12B-NVFP4
     litellm_params:
       model: openai/Nemotron-3-Super-120B-A12B-NVFP4
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
+      api_key: "no-key"
       include_reasoning: true
       supports_reasoning: true
       merge_reasoning_content_in_choices: true
@@ -330,48 +351,45 @@ model_list:
     litellm_params:
       model: openai/GPT-OSS-120B
       api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
-      include_reasoning: true 
+      api_key: "no-key"
+      include_reasoning: true
       supports_reasoning: true
       merge_reasoning_content_in_choices: false
 
   # --- Mistral (Strong Logic, but usually skips <think> tags) ---
- # - model_name: Mistral-Small-24B-Instruct-2501
-#    litellm_params:
-#      model: openai/Mistral-Small-24B-Instruct-2501
-#      api_base: "http://llama-swap:8080/v1"
-#      api_key: "sk-your-litellm-master-key"
-#      # Usually a standard chat model, but very capable. 
-#      # Keep these false unless you force tags in the system prompt.
-#      include_reasoning: false
-#      supports_reasoning: true
-#      merge_reasoning_content_in_choices: true
+  - model_name: Mistral-Small-24B-Instruct-2501
+    litellm_params:
+      model: openai/Mistral-Small-24B-Instruct-2501
+      api_base: "http://llama-swap:8080/v1"
+      api_key: "no-key"
+      include_reasoning: false
+      supports_reasoning: false
 
   # ===================================================
   # 🎭 CLAUDE CODE COMPATIBILITY LAYER
   # ===================================================
-  - model_name: claude-3-5-sonnet-20241022
-    litellm_params:
-      model: openai/GLM-4.6-derestricted
-      api_base: "http://ollama:11434"
-      api_key: "sk-your-litellm-master-key"
+  # - model_name: claude-3-5-sonnet-20241022
+  #   litellm_params:
+  #     model: openai/GLM-4.6-derestricted
+  #     api_base: "http://ollama:11434"
+  #     api_key: "no-key"
 
-  - model_name: qwen-3-coder-30b-fp8
-    litellm_params:
-      model: openai/Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
-      api_base: "http://ollama:11434/v1" 
-      api_key: "sk-your-litellm-master-key"
-      drop_params: true
+  # - model_name: qwen-3-coder-30b-fp8
+  #   litellm_params:
+  #     model: openai/Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+  #     api_base: "http://ollama:11434/v1"
+  #     api_key: "no-key"
+  #     drop_params: true
 
   # ===================================================
   # 🦙 OLLAMA (Local & Proxy)
   # ===================================================
 
-#  - model_name: dolphin-mistral-24b
-#    litellm_params:
-#      model: openai/ikiru/dolphin-mistral-24b-venice-edition:latest
-#      api_base: "http://llama-swap:8080/v1"
-#      api_key: "sk-your-litellm-master-key"
+  # - model_name: dolphin-mistral-24b
+  #   litellm_params:
+  #     model: openai/ikiru/dolphin-mistral-24b-venice-edition:latest
+  #     api_base: "http://llama-swap:8080/v1"
+  #     api_key: "no-key"
 
 litellm_settings:
   drop_params: true
