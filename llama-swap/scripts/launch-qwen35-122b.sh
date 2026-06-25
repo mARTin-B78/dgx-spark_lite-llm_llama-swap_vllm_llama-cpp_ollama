@@ -52,8 +52,8 @@ exec docker run --rm --name "vllm-qwen3.5-122b-${PORT}" \
     --host "${HOST}" --port "${PORT}" \
     --gpu-memory-utilization "${GMEM}" \
     --max-model-len 131072 \
-    --max-num-seqs 10 \
-    --max-num-batched-tokens 32768 \
+    --max-num-seqs 3 \
+    --max-num-batched-tokens 8192 \
     --max-cudagraph-capture-size 10 \
     --kv-cache-dtype fp8 \
     --load-format fastsafetensors \
