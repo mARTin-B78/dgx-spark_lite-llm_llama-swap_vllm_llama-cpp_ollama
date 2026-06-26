@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.2] — 2026-06-25
+
+### Changed
+- **`Qwen3.5-122B-A10B-int4-AutoRound`**: Optimized launch script (`launch-qwen35-122b.sh`) for single-user interactive latency by reducing `--max-num-seqs` (10 → 3) and `--max-num-batched-tokens` (32768 → 8192).
+- **`Nemotron-3-Nano-30B-A3B-NVFP4`**: Optimized prefill performance in `config.yaml.sample` to prevent 180s HTTP timeouts on large prompts. Halved context to 131k, reduced concurrency to 4, enabled chunked prefill, and added `expandable_segments` PyTorch alloc config to prevent unified-memory swap thrashing.
+
+---
+
+## [0.10.1] — 2026-06-17
+
+### Removed
+- **`Qwen3.5-122B-A10B-hybrid-int4fp8`** model registration removed from
+  `llama-swap/config.yaml.sample` and `benchmark-models.sh`. The hybrid checkpoint
+  loads successfully but generates garbled/incoherent output (confirmed even at
+  temperature=0, with and without the `mods/fix-qwen3.5-hybrid-int4fp8` patches), so it
+  is no longer exposed as a selectable model. The `mods/` and launch script remain in
+  place for future work once the checkpoint is rebuilt. Use
+  `Qwen3.5-122B-A10B-int4-AutoRound` instead.
+
+---
+
 ## [0.10.0] — 2026-06-12
 
 ### Added
@@ -207,7 +228,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 <!-- version diff links — update tags in GitHub after each release -->
-[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.1...v0.10.2
+[0.10.1]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.7.0...v0.8.0

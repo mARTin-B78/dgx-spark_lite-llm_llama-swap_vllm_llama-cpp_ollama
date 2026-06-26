@@ -388,18 +388,6 @@ models:
   # Uses a launcher script that queries free VRAM at launch time and sets
   # gpu_memory_utilization dynamically (max 0.85, min 0.60) so vLLM's startup
   # sanity check never fails due to residual CUDA memory from previous containers.
-  #
-  # NOTE: this checkpoint currently loads successfully but generates
-  # garbled/incoherent output (confirmed even at temperature=0, with and
-  # without the mods/fix-qwen3.5-hybrid-int4fp8 patches). The checkpoint
-  # itself likely needs to be rebuilt. See the launch script's comments.
-  #Qwen3.5-122B-A10B-hybrid-int4fp8:
-  #  ttl: 0
-  #  readyTimeout: 1800
-  #  checkEndpoint: "/health"
-  #  cmd: /app/scripts/launch-qwen35-122b-hybrid.sh ${PORT} ${host}
-  #  cmdStop: "docker stop vllm-qwen3.5-122b-hybrid-${PORT}"
-
   Qwen3.5-122B-A10B-int4-AutoRound:
     ttl: 0
     readyTimeout: 1800
@@ -596,8 +584,9 @@ models:
       CONTAINER_NAME=vllm-nemotron-${PORT}
       IMAGE=vllm-node:latest
       PORT=${PORT} HOST=${host}
-      MAX_MODEL_LEN=262144 MAX_NUM_SEQS=10 KV_DTYPE_BYTES=1
+      MAX_MODEL_LEN=131072 MAX_NUM_SEQS=4 KV_DTYPE_BYTES=1
       GMEM_MIN=0.40 GMEM_MAX=0.70 SAFETY_GIB=4
+      EXTRA_DOCKER_ARGS='-e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Nemotron-3-Nano-30B-A3B-NVFP4
       --chat-template /models/vllm/nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af/chat_template.jinja
@@ -606,6 +595,8 @@ models:
       --load-format fastsafetensors
       --trust-remote-code
       --enable-prefix-caching
+      --enable-chunked-prefill
+      --max-num-batched-tokens 8192
       --enable-auto-tool-choice
       --tool-call-parser qwen3_coder
       --reasoning-parser-plugin /models/vllm/nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af/nano_v3_reasoning_parser.py
