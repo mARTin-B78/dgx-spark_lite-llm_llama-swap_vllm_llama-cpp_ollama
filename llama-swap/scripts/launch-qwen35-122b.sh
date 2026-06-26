@@ -44,11 +44,11 @@ exec docker run --rm --name "vllm-qwen3.5-122b-${PORT}" \
     --runtime nvidia --gpus all --ipc=host --network container:llama-swap \
     -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1 \
     -e VLLM_MARLIN_USE_ATOMIC_ADD=1 \
-    -v "${LLM_ROOT_PATH:-/home/sparky/LLMs/vllm}:/models/vllm" \
+    -v "${LLM_ROOT_PATH:-/home/user/LLMs}/vllm:/models/vllm" \
     vllm-node:latest \
-    vllm serve /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound \
+    vllm serve /models/vllm/Intel/Qwen3.5-122B-A10B-int4-AutoRound \
     --served-model-name Qwen3.5-122B-A10B-int4-AutoRound \
-    --chat-template /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound/chat_template-tool-strict.jinja \
+    --chat-template /models/vllm/Intel/Qwen3.5-122B-A10B-int4-AutoRound/chat_template.jinja \
     --host "${HOST}" --port "${PORT}" \
     --gpu-memory-utilization "${GMEM}" \
     --max-model-len 131072 \

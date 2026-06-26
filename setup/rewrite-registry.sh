@@ -45,7 +45,7 @@ if [ -f "$REPO_ROOT/.env" ]; then
 fi
 
 REGISTRY="${REGISTRY:-}"
-IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-${GH_USER:-}}"
+IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-${REGISTRY_USER:-}}"
 
 # What we're rewriting from. The repo's published images live here:
 OLD_REGISTRY="ghcr.io"

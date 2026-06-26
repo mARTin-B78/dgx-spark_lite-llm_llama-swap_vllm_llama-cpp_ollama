@@ -184,8 +184,8 @@ Create your `.env` file:
 ```bash
 cp .env.sample .env
 # Edit .env and fill in:
-#   GH_USER=your-github-username
-#   GH_PAT=ghp_your_personal_access_token
+#   REGISTRY_USER=your-registry-username
+#   REGISTRY_TOKEN=your-registry-token
 #   LLM_ROOT_PATH=/home/YOUR_USER/LLMs
 #   REPO_CONFIG_PATH=/home/YOUR_USER/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama
 #   LITELLM_MASTER_KEY=sk-choose-a-secure-key
@@ -337,13 +337,13 @@ REPO=/home/YOUR_USER/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama
 mkdir -p $REPO/llama-swap/scripts
 ```
 
-**llama-swap/config.yaml** — the heart of the stack. Copy and patch the sample:
+**llama-swap/config.yaml** — the heart of the stack. Copy the sample directly:
 
 ```bash
 cp llama-swap/config.yaml.sample llama-swap/config.yaml
-sed -i "s|/path/to/LLMs|$LLM_ROOT_PATH|g" llama-swap/config.yaml
-sed -i "s|/path/to/Docker|$HOME/Docker|g" llama-swap/config.yaml
 ```
+
+No substitution needed — the sample uses llama-swap's native `${env.VAR}` syntax, which reads `LLM_ROOT_PATH`, `REPO_CONFIG_PATH`, `REGISTRY`, and `IMAGE_NAMESPACE` directly from the container's environment at startup (all injected via `docker-compose.yml`).
 
 Key concepts in the config:
 
@@ -637,7 +637,7 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - GITHUB_TOKEN=YOUR_GITHUB_PAT
+      - REGISTRY_TOKEN=${REGISTRY_TOKEN}
     networks:
       - dgx_net
 
