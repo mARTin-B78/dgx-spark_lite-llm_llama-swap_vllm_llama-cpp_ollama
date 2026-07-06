@@ -15,6 +15,7 @@ FORUM_UPDATE.md
 probe-models.sh
 ds4/
 *.o
+*.sqlite
 *.pid
 
 # --- Runtime Logs & State ---
