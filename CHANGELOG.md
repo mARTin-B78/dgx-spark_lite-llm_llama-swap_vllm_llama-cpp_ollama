@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.3] — 2026-07-06
+
+### Changed
+- **`Qwen3.5-122B-A10B-int4-AutoRound`**: Added DFlash speculative decoding (`z-lab/Qwen3.5-122B-A10B-DFlash`, 15 spec tokens) to the launch script for massive throughput gains.
+- **`Qwen3.5-27B-Uncensored-DFlash-NVFP4`**: Updated attention backend to `flashinfer` in `llama-swap/config.yaml` to improve agentic tool-calling accuracy.
+- **`Qwen3.6-27B-PrismaSCOUT-NVFP4`** & **`Qwen3.6-27B-uncensored-heretic-vllm`**: Updated attention backend to `flashinfer` to maximize quality across NVFP4 models.
+- **`overnight.sh`**: Expanded script to cover all 20 registered models and added `--quality-mode full` for rigorous 69-scenario `tool-eval-bench` validation.
+
+### Tooling
+- Upgraded `tool-eval-bench` CLI to v2.1.0 to enforce strict agentic fact extraction in Hard Mode.
+
+---
+
 ## [0.10.2] — 2026-06-25
 
 ### Changed
