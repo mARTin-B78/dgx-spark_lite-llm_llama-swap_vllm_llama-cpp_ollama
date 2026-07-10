@@ -45,7 +45,7 @@ exec docker run --rm --name "vllm-qwen3.5-122b-${PORT}" \
     -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1 \
     -e VLLM_MARLIN_USE_ATOMIC_ADD=1 \
     -v "${LLM_ROOT_PATH:-/home/user/LLMs}/vllm:/models/vllm" \
-    -v "/home/sparky/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/vllm/build/spark-vllm-docker/mods:/mods" \
+    -v "${REPO_CONFIG_PATH:-/home/user/Docker/dgx-spark_master_stack}/vllm/build/spark-vllm-docker/mods:/mods" \
     --entrypoint /bin/bash \
     vllm-node:latest \
     -c "cd /mods/fix-qwen3.5-autoround && ./run.sh && exec vllm serve /models/vllm/Intel/Qwen3.5-122B-A10B-int4-AutoRound \
