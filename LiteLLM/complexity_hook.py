@@ -33,7 +33,7 @@ ROUTER_CONFIG = {
         "SIMPLE": "Qwen3.5-4B-Q4_K_M",
         "MEDIUM": "Qwen3.5-4B-Q4_K_M",
         "COMPLEX": "Qwen3.5-4B-Q4_K_M",
-        "REASONING": "Qwen3.6-27B-PrismaSCOUT-NVFP4",
+        "REASONING": "Qwen3.5-4B-Q4_K_M",
     },
     "tier_boundaries": {
         "simple_medium": 0.18,
