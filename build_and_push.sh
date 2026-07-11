@@ -25,7 +25,8 @@ Examples:
   $(basename "$0") litellm-spark vllm-spark     # build and push two images
 
 Registry and credentials are read from .env (REGISTRY, IMAGE_NAMESPACE,
-REGISTRY_USER, REGISTRY_TOKEN).
+REGISTRY_USER, REGISTRY_TOKEN). Set REGISTRY=local to build images locally
+only, without logging in or pushing to a registry.
 EOF
 }
 
@@ -66,10 +67,6 @@ if [ -z "$IMAGE_NAMESPACE" ]; then
     echo "❌ Error: IMAGE_NAMESPACE (or GH_USER) not set in .env"
     exit 1
 fi
-if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_TOKEN" ]; then
-    echo "❌ Error: REGISTRY_USER/REGISTRY_TOKEN (or GH_USER/GITHUB_TOKEN) not set in .env"
-    exit 1
-fi
 
 echo "🚀 Starting Spark GB10 Unified Build Process..."
 echo "   Registry  : $REGISTRY"
@@ -78,9 +75,18 @@ echo "   Namespace : $IMAGE_NAMESPACE"
 # Move to project root
 cd "$REPO_ROOT"
 
-# 2. Automated Login (No prompt)
-echo "🔑 Logging into container registry: $REGISTRY"
-echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+if [ "$REGISTRY" = "local" ]; then
+    echo "🔧 REGISTRY=local — building images for local use only, skipping registry login"
+else
+    if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_TOKEN" ]; then
+        echo "❌ Error: REGISTRY_USER/REGISTRY_TOKEN (or GH_USER/GITHUB_TOKEN) not set in .env"
+        exit 1
+    fi
+
+    # 2. Automated Login (No prompt)
+    echo "🔑 Logging into container registry: $REGISTRY"
+    echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+fi
 
 # 3. Build and Push Function
 build_and_push() {
@@ -96,8 +102,12 @@ build_and_push() {
 
     docker build -t "$tag" -f "$folder/$dockerfile" "$folder"
 
-    echo "📦 Pushing: $tag"
-    docker push "$tag"
+    if [ "$REGISTRY" = "local" ]; then
+        echo "⏭️  Skipping push: REGISTRY=local"
+    else
+        echo "📦 Pushing: $tag"
+        docker push "$tag"
+    fi
 }
 
 # --- EXECUTE BUILDS ---
@@ -132,8 +142,14 @@ run_if_selected "./ollama" "ollama.Dockerfile" "ollama-spark" "${FILTER[@]}"
 # 5. LITELLM
 run_if_selected "./LiteLLM" "litellm.Dockerfile" "litellm-spark" "${FILTER[@]}"
 
-if [ ${#FILTER[@]} -eq 0 ]; then
-    echo "✅ All Spark-optimized images have been pushed to $REGISTRY!"
+if [ "$REGISTRY" = "local" ]; then
+    ACTION="built locally"
 else
-    echo "✅ Done pushing: ${FILTER[*]} to $REGISTRY!"
+    ACTION="pushed to $REGISTRY"
+fi
+
+if [ ${#FILTER[@]} -eq 0 ]; then
+    echo "✅ All Spark-optimized images have been $ACTION!"
+else
+    echo "✅ Done: ${FILTER[*]} $ACTION!"
 fi

@@ -414,27 +414,42 @@ mkdir -p "${REPO_CONFIG_PATH}/llama-swap/scripts"
 print_success "Directories created/verified"
 
 ###############################################################################
-# 10. GITHUB/HUGGINGFACE CREDENTIALS
+# 10. HUGGINGFACE CREDENTIALS
 ###############################################################################
 
-print_header "Step 10: Model Repository Credentials"
+print_header "Step 10: HuggingFace Credentials"
 
 print_info "HuggingFace token is needed to download models from private or rate-limited repos."
 HF_TOKEN=$(ask_input "HuggingFace User Access Token (or leave blank to skip)" "${HF_TOKEN}")
 
-print_info "Container registry credentials (used to push the stack images)."
-print_info "Default is GitHub Container Registry (ghcr.io). For GitLab/Harbor/Nexus,"
-print_info "set REGISTRY and IMAGE_NAMESPACE accordingly."
-REGISTRY=$(ask_input "Container registry hostname" "${REGISTRY}")
-REGISTRY_USER=$(ask_input "Registry login user (GitHub username for ghcr.io, robot account for others)" "${REGISTRY_USER}")
-IMAGE_NAMESPACE=$(ask_input "Image namespace (path under the registry; for ghcr.io = your username; for GitLab = group/project)" "${IMAGE_NAMESPACE:-${REGISTRY_USER}}")
-REGISTRY_TOKEN=$(ask_input "Registry token / password (GitHub PAT with 'write:packages' for ghcr.io, GitLab deploy token, …)" "${REGISTRY_TOKEN}")
-
 ###############################################################################
-# 11. GENERATE CONFIGURATION FILES
+# 11. CONTAINER REGISTRY
 ###############################################################################
 
-print_header "Step 11: Generating Configuration Files"
+print_header "Step 11: Container Registry"
+
+print_info "A container registry (ghcr.io, GitLab, Harbor, ...) lets you push built images and pull them elsewhere."
+print_info "If you only run the stack locally on this machine, you can skip this — images are built and used locally."
+
+USE_REGISTRY_DEFAULT=$([[ "${REGISTRY}" = "local" ]] && echo "false" || echo "true")
+if [[ "$(ask_yes_no_default "Use a container registry" "${USE_REGISTRY_DEFAULT}")" = "true" ]]; then
+    print_info "Default is GitHub Container Registry (ghcr.io). For GitLab/Harbor/Nexus,"
+    print_info "set REGISTRY and IMAGE_NAMESPACE accordingly."
+    REGISTRY=$(ask_input "Container registry hostname" "${REGISTRY}")
+    REGISTRY_USER=$(ask_input "Registry login user (GitHub username for ghcr.io, robot account for others)" "${REGISTRY_USER}")
+    IMAGE_NAMESPACE=$(ask_input "Image namespace (path under the registry; for ghcr.io = your username; for GitLab = group/project)" "${IMAGE_NAMESPACE:-${REGISTRY_USER}}")
+    REGISTRY_TOKEN=$(ask_input "Registry token / password (GitHub PAT with 'write:packages' for ghcr.io, GitLab deploy token, …)" "${REGISTRY_TOKEN}")
+else
+    REGISTRY="local"
+    IMAGE_NAMESPACE="spark"
+    print_info "Skipping registry setup — images will be built and tagged locally only (REGISTRY=local, IMAGE_NAMESPACE=spark)."
+fi
+
+###############################################################################
+# 12. GENERATE CONFIGURATION FILES
+###############################################################################
+
+print_header "Step 12: Generating Configuration Files"
 
 # Generate .env file
 print_info "Generating .env file..."
@@ -527,7 +542,7 @@ fi
 
 
 ###############################################################################
-# 12. SUMMARY
+# 13. SUMMARY
 ###############################################################################
 
 print_header "Setup Complete!"
@@ -576,10 +591,15 @@ echo "   ./build-and-copy.sh --exp-mxfp4  # vllm-node-mxfp4:latest  (GPT-OSS-120
 echo "   cd ../../.."
 echo ""
 
-echo -e "${YELLOW}5. Authenticate to the container registry (required to pull images):${NC}"
-echo "   docker login ${REGISTRY} -u ${REGISTRY_USER}"
-echo "   # Docker will prompt for your password / personal access token"
-echo "   # (Skip if you just ran step 3 — build_and_push.sh already logged in)"
+if [ "${REGISTRY}" != "local" ]; then
+    echo -e "${YELLOW}5. Authenticate to the container registry (required to pull images):${NC}"
+    echo "   docker login ${REGISTRY} -u ${REGISTRY_USER}"
+    echo "   # Docker will prompt for your password / personal access token"
+    echo "   # (Skip if you just ran step 3 — build_and_push.sh already logged in)"
+else
+    echo -e "${YELLOW}5. Container registry authentication:${NC}"
+    echo "   Not needed — REGISTRY=local (images are built and used locally only)."
+fi
 echo ""
 
 echo -e "${YELLOW}6. Start the stack:${NC}"

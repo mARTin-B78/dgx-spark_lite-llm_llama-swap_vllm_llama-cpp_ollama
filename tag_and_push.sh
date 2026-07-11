@@ -24,7 +24,8 @@ Examples:
 
 The local images must already exist (built by vllm/build/spark-vllm-docker/build-and-copy.sh).
 Registry and credentials are read from .env (REGISTRY, IMAGE_NAMESPACE,
-REGISTRY_USER, REGISTRY_TOKEN).
+REGISTRY_USER, REGISTRY_TOKEN). Set REGISTRY=local to tag images locally
+only, without logging in or pushing to a registry.
 EOF
 }
 
@@ -53,17 +54,22 @@ if [ -z "$IMAGE_NAMESPACE" ]; then
     echo "❌ Error: IMAGE_NAMESPACE (or GH_USER) not set in .env"
     exit 1
 fi
-if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_TOKEN" ]; then
-    echo "❌ Error: REGISTRY_USER/REGISTRY_TOKEN (or GH_USER/GITHUB_TOKEN) not set in .env"
-    exit 1
-fi
 
 echo "🚀 Tagging and pushing vllm-node images..."
 echo "   Registry  : $REGISTRY"
 echo "   Namespace : $IMAGE_NAMESPACE"
 
-echo "🔑 Logging into container registry: $REGISTRY"
-echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+if [ "$REGISTRY" = "local" ]; then
+    echo "🔧 REGISTRY=local — tagging images for local use only, skipping registry login"
+else
+    if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_TOKEN" ]; then
+        echo "❌ Error: REGISTRY_USER/REGISTRY_TOKEN (or GH_USER/GITHUB_TOKEN) not set in .env"
+        exit 1
+    fi
+
+    echo "🔑 Logging into container registry: $REGISTRY"
+    echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+fi
 
 # --- TAG AND PUSH FUNCTION ---
 tag_and_push() {
@@ -77,8 +83,12 @@ tag_and_push() {
     echo "---------------------------------------------------------"
     docker tag "$local_image" "$remote_tag"
 
-    echo "📦 Pushing: $remote_tag"
-    docker push "$remote_tag"
+    if [ "$REGISTRY" = "local" ]; then
+        echo "⏭️  Skipping push: REGISTRY=local"
+    else
+        echo "📦 Pushing: $remote_tag"
+        docker push "$remote_tag"
+    fi
 }
 
 # --- SELECTIVE EXECUTION ---
@@ -99,8 +109,14 @@ run_if_selected "vllm-node:latest"       "vllm-node:latest"       "vllm-node"   
 run_if_selected "vllm-node-tf5:latest"   "vllm-node-tf5:latest"   "vllm-node-tf5"   "${FILTER[@]}"
 run_if_selected "vllm-node-mxfp4:latest" "vllm-node-mxfp4:latest" "vllm-node-mxfp4" "${FILTER[@]}"
 
-if [ ${#FILTER[@]} -eq 0 ]; then
-    echo "✅ All vllm-node images have been pushed to $REGISTRY!"
+if [ "$REGISTRY" = "local" ]; then
+    ACTION="tagged locally"
 else
-    echo "✅ Done pushing: ${FILTER[*]} to $REGISTRY!"
+    ACTION="pushed to $REGISTRY"
+fi
+
+if [ ${#FILTER[@]} -eq 0 ]; then
+    echo "✅ All vllm-node images have been $ACTION!"
+else
+    echo "✅ Done: ${FILTER[*]} $ACTION!"
 fi
