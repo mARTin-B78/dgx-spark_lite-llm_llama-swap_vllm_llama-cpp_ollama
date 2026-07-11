@@ -309,10 +309,7 @@ print_info "LiteLLM is a unified API gateway that provides a single OpenAI-compa
 print_info "It routes requests to the appropriate model container and handles authentication."
 
 LITELLM_CONFIGURED=false
-if check_container_running "litellm"; then
-    print_success "LiteLLM is already running"
-    LITELLM_CONFIGURED=true
-elif [[ "$(ask_yes_no_default "Install LiteLLM" "${LITELLM_IN_PROFILES}")" = "true" ]]; then
+if [[ "$(ask_yes_no_default "Install LiteLLM" "${LITELLM_IN_PROFILES}")" = "true" ]]; then
     LITELLM_PORT=$(get_port "LiteLLM API port" "${LITELLM_PORT}")
 
     print_success "Will use port ${LITELLM_PORT} for LiteLLM"
@@ -334,10 +331,7 @@ print_info "llama-swap manages VRAM allocation, automatically loading/unloading 
 print_info "This is the core of the stack — it enables seamless multi-model switching on 128GB."
 
 LLAMASWAP_CONFIGURED=false
-if check_container_running "llama-swap"; then
-    print_success "llama-swap is already running"
-    LLAMASWAP_CONFIGURED=true
-elif [[ "$(ask_yes_no_default "Install llama-swap" "${LLAMASWAP_IN_PROFILES}")" = "true" ]]; then
+if [[ "$(ask_yes_no_default "Install llama-swap" "${LLAMASWAP_IN_PROFILES}")" = "true" ]]; then
     LLAMA_SWAP_PORT=$(get_port "llama-swap proxy port" "${LLAMA_SWAP_PORT}")
     
     print_success "Will use port ${LLAMA_SWAP_PORT} for llama-swap"
@@ -356,10 +350,7 @@ print_warning "llama-server is disabled by default in docker-compose.yml — lla
 print_info "Enable it only if you want a model permanently hot in VRAM. This permanently consumes VRAM that llama-swap cannot reclaim, reducing headroom for other models."
 
 LLAMACPP_CONFIGURED=false
-if check_container_running "llama.cpp"; then
-    print_success "llama.cpp is already running"
-    LLAMACPP_CONFIGURED=true
-elif [[ "$(ask_yes_no_default "Install llama.cpp" "${LLAMACPP_IN_PROFILES}")" = "true" ]]; then
+if [[ "$(ask_yes_no_default "Install llama.cpp" "${LLAMACPP_IN_PROFILES}")" = "true" ]]; then
     LLAMA_CPP_PORT=$(get_port "llama.cpp API port" "${LLAMA_CPP_PORT}")
     
     print_success "Will use port ${LLAMA_CPP_PORT} for llama.cpp"
@@ -378,10 +369,7 @@ print_warning "ollama is disabled by default in docker-compose.yml — it runs o
 print_info "Enable it only if you specifically need Ollama's modelfile system. It permanently consumes VRAM that llama-swap cannot reclaim, reducing headroom for other models."
 
 OLLAMA_CONFIGURED=false
-if check_container_running "ollama"; then
-    print_success "Ollama is already running"
-    OLLAMA_CONFIGURED=true
-elif [[ "$(ask_yes_no_default "Install Ollama" "${OLLAMA_IN_PROFILES}")" = "true" ]]; then
+if [[ "$(ask_yes_no_default "Install Ollama" "${OLLAMA_IN_PROFILES}")" = "true" ]]; then
     OLLAMA_PORT=$(get_port "Ollama API port" "${OLLAMA_PORT}")
     
     print_success "Will use port ${OLLAMA_PORT} for Ollama"
@@ -400,10 +388,7 @@ print_warning "vllm is disabled by default in docker-compose.yml — llama-swap 
 print_info "Enable it only if you want a vLLM sidecar permanently loaded in VRAM. This permanently consumes VRAM that llama-swap cannot reclaim, reducing headroom for other models."
 
 VLLM_CONFIGURED=false
-if check_container_running "vllm"; then
-    print_success "vLLM is already running"
-    VLLM_CONFIGURED=true
-elif [[ "$(ask_yes_no_default "Install vLLM (persistent sidecar)" "${VLLM_IN_PROFILES}")" = "true" ]]; then
+if [[ "$(ask_yes_no_default "Install vLLM (persistent sidecar)" "${VLLM_IN_PROFILES}")" = "true" ]]; then
     VLLM_PORT=$(get_port "vLLM API port" "${VLLM_PORT}")
 
     print_success "Will use port ${VLLM_PORT} for vLLM"
