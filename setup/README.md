@@ -16,7 +16,7 @@ cd setup/
 **What it does:**
 - ✅ Checks Docker installation and NVIDIA Container Runtime
 - ✅ Detects running services and port availability
-- ✅ Guides you through service selection (Portainer, LiteLLM, llama.cpp, Ollama, llama-swap)
+- ✅ Guides you through service selection (Portainer, LiteLLM, llama-swap, llama.cpp, Ollama, vLLM)
 - ✅ Collects credentials (HuggingFace token, GitHub PAT)
 - ✅ Lets you select model tiers (S/M/L/GGUF)
 - ✅ Auto-generates `.env` and `docker-compose.yml`
@@ -28,6 +28,56 @@ cd setup/
 - `.env` - All paths, ports, and credentials
 - `docker-compose.yml` - Pre-configured service definitions
 - `setup/SETUP_SUMMARY.txt` - Your configuration reference
+
+### Next steps
+
+#### Review the generated files before proceeding
+```bash
+cat ../.env
+cat ../docker-compose.yml
+```
+
+#### Copy and configure the llama-swap model config
+```bash
+cp ../llama-swap/config.yaml.sample ../llama-swap/config.yaml
+```
+
+#### Change directory to the parent directory
+```bash
+cd ..
+```
+
+#### Build the ephemeral vLLM images from the submodule (one-time, ~30-60 min)
+```bash
+git submodule update --init --recursive
+cd vllm/build/spark-vllm-docker
+./build-and-copy.sh              # vllm-node:latest         (most models)
+./build-and-copy.sh --tf5        # vllm-node-tf5:latest     (Mamba/hybrid models)
+./build-and-copy.sh --exp-mxfp4  # vllm-node-mxfp4:latest   (GPT-OSS-120B MXFP4, optional)
+cd ../../..
+```
+
+#### Build and push the five stack images to your registry
+```bash
+./build_and_push.sh
+```
+
+#### Auto-download models based on your tier selections
+```bash
+./setup/download-models.sh
+```
+
+#### Login to your docker registry
+Skip if you just ran ./build_and_push.sh — you are already logged in
+```bash
+docker login <registry> -u <username>  # Docker will prompt for your password / personal access token
+```
+
+#### Start the stack (images are now in the registry and can be pulled)
+```bash
+
+docker compose up -d
+```
 
 ---
 
@@ -86,9 +136,11 @@ llama-swap VRAM Orchestrator (port 8080 internal, 28080 host)
 **Key Components:**
 - **LiteLLM**: Unified OpenAI-compatible API endpoint
 - **llama-swap**: VRAM manager for seamless multi-model switching
-- **vLLM**: High-throughput inference engine for large models
-- **llama.cpp**: Optimized GGUF quantized model inference
-- **Ollama**: Built-in model management and API
+- **vLLM**: High-throughput inference engine for large models (spawned as ephemeral containers by llama-swap)
+- **llama.cpp**: Optimized GGUF quantized model inference (spawned as ephemeral containers by llama-swap)
+- **Ollama**: Built-in model management and API (spawned as ephemeral containers by llama-swap)
+
+> **Note:** `vllm`, `llama-server`, and `ollama` are **disabled by default** in `docker-compose.yml` as persistent Compose services. llama-swap manages them as ephemeral containers instead, which lets it reclaim VRAM when models are idle. Running them as persistent services alongside llama-swap permanently occupies VRAM that llama-swap cannot free, and on a 128 GB GB10 this can cause out-of-memory crashes when loading large models. To enable a persistent service, add its profile name to `COMPOSE_PROFILES` in `.env`.
 
 ---
 
@@ -160,16 +212,19 @@ cat docker-compose.yml
 # 2. Download models (if not already done)
 ./setup/download-models.sh
 
-# 3. Start the stack
+# 3. (vLLM models only, one-time) Build ephemeral inference images
+#    → See "Build the ephemeral vLLM images from the submodule" in Option 1 above
+
+# 4. Start the stack
 docker compose up -d
 
-# 4. Check services
+# 5. Check services
 docker compose ps
 
-# 5. Test the API
+# 6. Test the API
 curl http://localhost:14000/v1/models
 
-# 6. View logs
+# 7. View logs
 docker compose logs -f litellm
 docker compose logs -f llama-swap
 ```
@@ -186,5 +241,6 @@ docker compose logs -f llama-swap
 
 ---
 
-Generated: 2026-04-26  
+Generated: 2026-04-26
+Updated: 2026-06-16
 For issues or questions: [GitHub Issues](https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/issues)

@@ -15,6 +15,7 @@ MAX_TOKENS=150
 TIMEOUT=1800          # 30 min max per model (large models need time to load)
 UNLOAD_WAIT=5         # seconds to wait after unloading
 RESULTS_DIR="$(dirname "$0")/test-results"
+LLAMA_SWAP_CONFIG="${LLAMA_SWAP_CONFIG:-$(dirname "$0")/llama-swap/config.yaml}"
 # --------------------------------------
 
 # Colors
@@ -44,6 +45,33 @@ escape_csv() {
     val="${val//\"/\"\"}"
     echo "\"$val\""
 }
+
+declare -A MODEL_IMAGES=()
+
+_load_image_map() {
+    [[ -f "$LLAMA_SWAP_CONFIG" ]] || return 0
+    while IFS=$'\t' read -r model img; do
+        [[ -n "$model" ]] && MODEL_IMAGES["$model"]="$img"
+    done < <(python3 - "$LLAMA_SWAP_CONFIG" 2>/dev/null <<'PYEOF'
+import sys, re, yaml
+with open(sys.argv[1]) as f:
+    config = yaml.safe_load(f)
+for name, cfg in (config.get('models') or {}).items():
+    cmd = (cfg or {}).get('cmd', '') if isinstance(cfg, dict) else ''
+    m = re.search(r'\bIMAGE=(\S+)', cmd)
+    if m:
+        print(f"{name}\t{m.group(1)}")
+        continue
+    m = re.search(r'(\S+)\s+(?:vllm\s+serve|ollama\s+serve|-m\s+/)', cmd)
+    if m:
+        img = re.sub(r'(?:\$\{env\.[^}]+\}/)+', '', m.group(1))
+        print(f"{name}\t{img}")
+        continue
+    print(f"{name}\t")
+PYEOF
+    )
+}
+_load_image_map
 
 unload_all() {
     # /unload is not a valid llama-swap endpoint (404) — unload each running
@@ -182,6 +210,9 @@ for MODEL in $MODELS; do
     # Unload previous model
     log "  Unloading previous model..."
     unload_all
+
+    MODEL_IMG="${MODEL_IMAGES[$MODEL]:-}"
+    [[ -n "$MODEL_IMG" ]] && log "  Docker image: ${MODEL_IMG}"
 
     if test_model "$MODEL"; then
         PASS=$((PASS + 1))

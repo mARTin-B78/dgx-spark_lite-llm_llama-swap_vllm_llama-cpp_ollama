@@ -1,35 +1,54 @@
-version: '3.8'
-
 # ==============================================================================
 # DGX SPARK / GRACE-BLACKWELL OPTIMIZED AI ORCHESTRATION STACK
 #
 # SETUP INSTRUCTIONS:
 # 1. Copy this file to `docker-compose.yml`
 # 2. Run `setup/setup.sh` (or hand-create a `.env`) so the following are set:
-#      GH_USER              — image-registry user (also docker-login user, default ghcr.io)
+#
+#    Services
+#      COMPOSE_PROFILES     — comma-separated profiles to activate; controls which services start
+#                             (e.g. litellm,llama-swap); generated automatically by setup/setup.sh
+#
+#    Registry / images
+#      REGISTRY             — container registry hostname (e.g. ghcr.io)
+#      REGISTRY_USER        — login user (GitHub username for ghcr.io, robot account for others)
+#      REGISTRY_TOKEN       — password / PAT (GitHub PAT with 'write:packages' for ghcr.io,
+#                             GitLab deploy token, etc.)
+#      IMAGE_NAMESPACE      — path under the registry that prefixes every image name;
+#                             for ghcr.io: same as REGISTRY_USER; for GitLab: group/project
+#
+#    Paths
 #      LLM_ROOT_PATH        — host path that holds the model files
 #      REPO_CONFIG_PATH     — absolute path to this repo on the host
-#      DATABASE_URL         — postgres URL for LiteLLM
-#                             e.g. postgresql://litellm_admin:PW@litellm-db:5432/litellm
+#
+#    Network
+#      EXTERNAL_NETWORK_NAME — Docker network name (create with step 3 below)
+#
+#    Ports
+#      LITELLM_PORT         — LiteLLM API gateway (recommended: 14000)
+#      LLAMA_SWAP_PORT      — llama-swap VRAM orchestrator (recommended: 28080)
+#      LLAMA_CPP_PORT       — persistent llama-server (recommended: 19000; service disabled by default)
+#      LLAMA_QWEN35_4B_PORT — persistent Qwen3.5-4B llama.cpp sidecar (recommended: 19001; service disabled by default)
+#      OLLAMA_PORT          — persistent Ollama service (recommended: 11434; service disabled by default)
+#      VLLM_PORT            — persistent vLLM sidecar (recommended: 18000; service disabled by default)
+#
+#    LiteLLM
 #      LITELLM_MASTER_KEY   — optional: enforce API key auth; omit for open API / UI-only auth
-#      POSTGRES_PASSWORD    — Postgres password for the LiteLLM DB
 #      LITELLM_UI_USERNAME  — admin username for the LiteLLM web UI
 #      LITELLM_UI_PASSWORD  — admin password for the LiteLLM web UI
+#      OPENAI_API_KEY       — optional: only needed for semantic-router embeddings
 #      POSTGRES_DB          — Postgres database name (default: litellm)
 #      POSTGRES_USER        — Postgres username (default: litellm_admin)
-#      GITHUB_TOKEN         — PAT for pulling images from ghcr.io (or your private REGISTRY)
+#      POSTGRES_PASSWORD    — Postgres password for the LiteLLM DB
 #
 #    NOTE: Docker must be logged into the registry before compose can pull images:
-#      echo $GITHUB_TOKEN | docker login ghcr.io -u <GH_USER> --password-stdin
+#      docker login <REGISTRY> -u <REGISTRY_USER>
 #    Or add the registry under Portainer → Settings → Registries.
 #
-#    Optional, for non-ghcr.io registries (GitLab, Harbor, Nexus, …):
-#      REGISTRY             — defaults to "ghcr.io"
-#      IMAGE_NAMESPACE      — path under the registry; defaults to ${GH_USER}.
-#                             For GitLab use "<group>/<project>".
 #    All image references below already expand ${REGISTRY} and
 #    ${IMAGE_NAMESPACE}, so just set them in .env and run as usual.
-# 3. `docker network create dgx_net`  (if you didn't already)
+#
+# 3. `docker network create ${EXTERNAL_NETWORK_NAME}`  (if you didn't already)
 # 4. `docker compose up -d`
 # ==============================================================================
 
@@ -37,37 +56,119 @@ version: '3.8'
 services:
 
   # ==========================================
-  # 1. VLLM (Primary Safetensors Engine)
+  # 1a. LITELLM (The API Gateway)
   # ==========================================
-  # NOTE: In practice, vLLM instances are typically managed by llama-swap
-  # (service 3) as ephemeral on-demand containers. Keep this block only if
-  # you want a *persistent* vLLM sidecar running alongside llama-swap.
-  vllm:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/vllm-spark:latest
-    container_name: vllm
+  # Single OpenAI-compatible endpoint (port $LITELLM_PORT) in front of all inference services.
+  # Internal port is 4000; mapped to $LITELLM_PORT externally to avoid the DGX
+  # NoMachine port conflict on 4000.
+  # The master key is intentionally disabled by default — the stack runs with
+  # open API access and UI-only authentication. Uncomment LITELLM_MASTER_KEY
+  # to require sk-* tokens on every API call.
+  #
+  # Enable by adding 'litellm' to COMPOSE_PROFILES in .env.
+  litellm:
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/litellm-spark:latest
+    profiles: [litellm]
+    container_name: litellm
     restart: unless-stopped
-    ipc: host
+    depends_on: [litellm-db]
     ports:
-      - "18000:8000"  # vLLM internal is always 8000; exposed as 18000
+      - "${LITELLM_PORT}:4000"  # Maps host $LITELLM_PORT → container 4000 (avoids NoMachine conflict)
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@litellm-db:5432/${POSTGRES_DB}
+      - UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username for the LiteLLM web UI
+      - UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password for the LiteLLM web UI
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}  # Optional: only needed for semantic-router embeddings
+    # - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}  # Uncomment to enforce API key auth
     volumes:
-      - ${LLM_ROOT_PATH}/safetensors:/model
+      - ${REPO_CONFIG_PATH}/LiteLLM/config.yaml:/app/config.yaml
+      - ${REPO_CONFIG_PATH}/LiteLLM/router.json:/app/router.json:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/complexity_hook.py:/app/complexity_hook.py:ro
+    command:
+      - "--config"
+      - "/app/config.yaml"
+      - "--port"
+      - "4000"   # Keep this at 4000 internally (mapped to $LITELLM_PORT externally)
+    networks:
+      - dgx_net
+
+  # ==========================================
+  # 1b. LITELLM DATABASE (PostgreSQL)
+  # ==========================================
+  # Stores LiteLLM's virtual keys, usage logs, and team/budget data.
+  #
+  # Enable by adding 'litellm' to COMPOSE_PROFILES in .env.
+  litellm-db:
+    image: postgres:15-alpine
+    profiles: [litellm]
+    container_name: litellm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - litellm_db_data:/var/lib/postgresql/data
+    networks:
+      - dgx_net
+
+  # ==========================================
+  # 2. LLAMA-SWAP (The VRAM Manager)
+  # ==========================================
+  # Orchestrates all inference containers: spawns them on demand via docker.sock,
+  # evicts them when idle so 128 GB unified memory is never wasted.
+  # LiteLLM routes to it via Docker DNS: http://llama-swap:8080
+  # Spawned model containers join its network namespace
+  # (--network container:llama-swap) so they are reachable as localhost:PORT
+  # inside llama-swap, even though they run in separate containers.
+  #
+  # Enable by adding 'llama-swap' to COMPOSE_PROFILES in .env.
+  llama-swap:
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/llama-swap-spark:latest
+    profiles: [llama-swap]
+    container_name: llama-swap
+    restart: unless-stopped
+    ports:
+      - "${LLAMA_SWAP_PORT}:8080"  # Maps host $LLAMA_SWAP_PORT → container 8080
+    entrypoint: ["/usr/bin/llama-swap", "-config", "/app/config.yaml", "-listen", "0.0.0.0:8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ${REPO_CONFIG_PATH}/llama-swap:/app        # llama-swap config directory
+      - /var/run/docker.sock:/var/run/docker.sock  # Required to spawn/evict model containers
+    # - /usr/bin/docker:/usr/bin/docker            # Uncomment if docker CLI is not bundled in the image
+      - ${LLM_ROOT_PATH}:/models                   # Model files — used by mod-script models
     deploy:
       resources:
         reservations:
           devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
-    command: >
-      --model /model/Qwen3.5-7B-Instruct --host 0.0.0.0 --port 8000
-    networks: [dgx_net]
-
+    environment:
+      - HOST_HOME=${HOME}                 # host user's home dir — used in config.yaml cmd strings as ${HOST_HOME}
+      - IMAGE_NAMESPACE=${IMAGE_NAMESPACE}
+      - LLM_ROOT_PATH=${LLM_ROOT_PATH}
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NVIDIA_VISIBLE_DEVICES=all
+      - REGISTRY=${REGISTRY}
+      - REGISTRY_TOKEN=${REGISTRY_TOKEN}  # token for pulling images when spawning model containers
+      - REPO_CONFIG_PATH=${REPO_CONFIG_PATH}
+    networks:
+      - dgx_net
 
   # ==========================================
-  # 2. LLAMA-SERVER (Persistent GGUF Engine)
+  # 3. LLAMA.CPP (The GGUF Engine)
   # ==========================================
   # Persistent llama.cpp instance for GGUF models; stays loaded between requests.
   # llama-swap can also spin *ephemeral* llama.cpp containers on demand — use
   # this block for a model you always want hot (e.g. a fast chat fallback).
+  #
+  # Enable by adding 'llama-server' to COMPOSE_PROFILES in .env.
   llama-server:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/llama-cpp-spark:latest
+    profiles: [llama-server]
     container_name: llama.cpp
     restart: unless-stopped
     ipc: host                          # Required for shared memory with GPU driver
@@ -77,7 +178,7 @@ services:
       memlock: -1                      # Unlimited locked memory — needed for unified VRAM
       stack: 67108864
     ports:
-      - "19000:19000"
+      - "${LLAMA_CPP_PORT}:19000"
     volumes:
       - ${LLM_ROOT_PATH}/ollama:/models/ollama
       # Mount individual GGUF files if you only want specific models:
@@ -114,56 +215,72 @@ services:
       - "600"        # Request timeout in seconds
     stdin_open: true
     tty: true
-    networks: [dgx_net]
-
+    networks:
+      - dgx_net
 
   # ==========================================
-  # 3. LLAMA-SWAP (The VRAM Manager)
+  # 3b. LLAMA-QWEN35-4B (Always-On Persistent GGUF Engine)
   # ==========================================
-  # Orchestrates all inference containers: spawns them on demand via docker.sock,
-  # evicts them when idle so 128 GB unified memory is never wasted.
-  # LiteLLM routes to it via Docker DNS: http://llama-swap:8080
-  # Spawned model containers join its network namespace
-  # (--network container:llama-swap) so they are reachable as localhost:PORT
-  # inside llama-swap, even though they run in separate containers.
-  llama-swap:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-swap-spark:latest
-    container_name: llama-swap
+  # Dedicated persistent instance for Qwen3.5-4B-Q4_K_M.
+  # Stays loaded regardless of what llama-swap loads or evicts — no ttl, no cmdStop.
+  # Sized for the STT→LLM→TTS pipeline: low latency, always warm.
+  # llama-swap routes to it via endpoint: http://llama-qwen35-4b:19001
+  llama-qwen35-4b:
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/llama-cpp-spark:latest
+    profiles: [llama-qwen35-4b]
+    container_name: llama-qwen35-4b
     restart: unless-stopped
+    ipc: host
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      memlock: -1
+      stack: 67108864
     ports:
-      - "28080:8080"  # Host 28080 → container 8080 (avoid conflict with other services)
-    entrypoint: ["/usr/bin/llama-swap", "-config", "/app/config.yaml", "-listen", "0.0.0.0:8080"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      - "${LLAMA_QWEN35_4B_PORT}:19001"
     volumes:
-      - ${REPO_CONFIG_PATH}/llama-swap:/app        # llama-swap config directory
-      - /var/run/docker.sock:/var/run/docker.sock  # Required to spawn/evict model containers
-    # - /usr/bin/docker:/usr/bin/docker             # Uncomment if docker CLI is not bundled in the image
-      - ${LLM_ROOT_PATH}:/models                   # Model files — used by mod-script models
+      - ${LLM_ROOT_PATH}/ollama:/models/ollama
     deploy:
       resources:
         reservations:
           devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - GITHUB_TOKEN=${GITHUB_TOKEN}  # PAT for pulling images when spawning model containers
-      - LLM_ROOT_PATH=${LLM_ROOT_PATH}  # Passed to launch scripts for volume mount fallback
-    networks: [dgx_net]
-
+      - GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+    command:
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "19001"
+      - -m
+      - /models/ollama/Alibaba/Qwen3.5-4B/Qwen3.5-4B-Q4_K_M.gguf
+      - --alias
+      - Qwen3.5-4B-Q4_K_M
+      - --parallel
+      - "2"
+      - --no-mmap
+      - --n-gpu-layers
+      - "99"
+      - --ctx-size
+      - "131072"
+      - --jinja
+      - --chat-template-kwargs
+      - '{"enable_thinking":false}'
+      - --timeout
+      - "600"
+    networks:
+      - dgx_net
 
   # ==========================================
-  # 4. OLLAMA (GGUF via Ollama modelfile format)
+  # 4. OLLAMA (The General Model Manager)
   # ==========================================
   # Handles models pulled or defined via Ollama's modelfile system.
   # The 15-second startup delay gives the GPU driver time to settle
   # before Ollama tries to claim VRAM — avoids init-time OOM on GB10.
+  #
+  # Enable by adding 'ollama' to COMPOSE_PROFILES in .env.
   ollama:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/ollama-spark:latest
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/ollama-spark:latest
+    profiles: [ollama]
     container_name: ollama
     restart: unless-stopped
     ipc: host
@@ -171,7 +288,7 @@ services:
       memlock: -1
       stack: 67108864
     ports:
-      - "11434:11434"
+      - "${OLLAMA_PORT}:11434"
     volumes:
       - ${LLM_ROOT_PATH}/ollama:/root/.ollama
     deploy:
@@ -187,68 +304,43 @@ services:
       - OLLAMA_LLM_LIBRARY=cuda_v13  # Force CUDA 13 backend for Blackwell SM121
       - OLLAMA_DEBUG=1               # Verbose logging; set to 0 in production
     entrypoint: ["/bin/sh", "-c", "sleep 15 && ollama serve"]
-    networks: [dgx_net]
-
+    networks:
+      - dgx_net
 
   # ==========================================
-  # 5. LITELLM (The Unified API Gateway)
+  # 5. VLLM (Primary Safetensors Engine)
   # ==========================================
-  # Single OpenAI-compatible endpoint (:14000) in front of all inference services.
-  # Internal port is 4000; mapped to 14000 externally to avoid the DGX
-  # NoMachine port conflict on 4000.
-  # The master key is intentionally disabled by default — the stack runs with
-  # open API access and UI-only authentication. Uncomment LITELLM_MASTER_KEY
-  # to require sk-* tokens on every API call.
-  litellm:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:latest
-    container_name: litellm
+  # NOTE: In practice, vLLM instances are typically managed by llama-swap
+  # (service 2) as ephemeral on-demand containers. Keep this block only if
+  # you want a *persistent* vLLM sidecar running alongside llama-swap.
+  #
+  # Enable by adding 'vllm' to COMPOSE_PROFILES in .env.
+  vllm:
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/vllm-spark:latest
+    profiles: [vllm]
+    container_name: vllm
     restart: unless-stopped
-    depends_on: [litellm-db]
+    ipc: host
     ports:
-      - "14000:4000"  # External 14000 → internal 4000 (avoids NoMachine conflict)
-    environment:
-      - DATABASE_URL=${DATABASE_URL}        # postgresql://litellm_admin:PW@litellm-db:5432/litellm
-      - UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username for the LiteLLM web UI
-      - UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password for the LiteLLM web UI
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}  # Optional: only needed for semantic-router embeddings
-    # - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}  # Uncomment to enforce API key auth
+      - "${VLLM_PORT}:8000"  # vLLM internal is always 8000; exposed as $VLLM_PORT
     volumes:
-      - ${REPO_CONFIG_PATH}/LiteLLM/config.yaml:/app/config.yaml
-      - ${REPO_CONFIG_PATH}/LiteLLM/router.json:/app/router.json:ro
-    command:
-      - "--config"
-      - "/app/config.yaml"
-      - "--port"
-      - "4000"   # Keep this at 4000 internally (mapped to 14000 externally)
-    networks: [dgx_net]
-
-
-  # ==========================================
-  # 6. LITELLM DATABASE (PostgreSQL)
-  # ==========================================
-  # Stores LiteLLM's virtual keys, usage logs, and team/budget data.
-  # Exposed on 15432 to avoid conflict with any host Postgres on 5432.
-  litellm-db:
-    image: postgres:15-alpine
-    container_name: litellm-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "15432:5432"
-    volumes:
-      - litellm_db_data:/var/lib/postgresql/data
-    networks: [dgx_net]
-
+      - ${LLM_ROOT_PATH}/safetensors:/model
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+    command: >
+      --model /model/Qwen3.5-7B-Instruct --host 0.0.0.0 --port 8000
+    networks:
+      - dgx_net
 
 # ==========================================
 # GLOBAL NETWORKS & VOLUMES
 # ==========================================
 networks:
   dgx_net:
-    external: true  # Create once with: docker network create dgx_net
+    external: true  # Create once with: docker network create ${EXTERNAL_NETWORK_NAME}
+    name: ${EXTERNAL_NETWORK_NAME}
 
 volumes:
   litellm_db_data:  # Persistent Postgres data for LiteLLM (keys, usage logs, budgets)

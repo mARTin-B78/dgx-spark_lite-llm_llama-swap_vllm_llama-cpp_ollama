@@ -11,7 +11,7 @@
 
 A production-ready Docker Compose stack that lets a single DGX Spark run **multiple large language models** without manual VRAM juggling. `llama-swap` acts as the orchestrator: it spins up the right inference container on demand and evicts it when idle, so 128 GB is never wasted on a model nobody is using.
 
-A unified **LiteLLM** gateway exposes every model through one OpenAI-compatible endpoint with a single API key — no per-service port juggling.
+A unified **LiteLLM** gateway exposes every model through one OpenAI-compatible endpoint — no per-service port juggling. Authentication is handled via the LiteLLM UI (username/password); the master API key is left commented out for an open-API design.
 
 ---
 
@@ -41,10 +41,12 @@ Client (Claude Code / Open WebUI / curl)
 |---|---|---|
 | LiteLLM | 14000 | API gateway |
 | llama-swap | 28080 | VRAM orchestrator |
-| Ollama | 11434 | GGUF / Ollama models |
-| llama.cpp (persistent) | 19000 | GGUF engine |
-| vLLM (persistent) | 18000 | Safetensors engine |
 | LiteLLM DB (Postgres) | 15432 | LiteLLM backend |
+| Ollama | 11434 | Persistent Ollama service — **disabled by default** |
+| llama-server | 19000 | Persistent GGUF engine — **disabled by default** |
+| vLLM (persistent) | 18000 | Persistent safetensors engine — **disabled by default** |
+
+> **OOM risk:** `ollama`, `llama-server`, and `vllm` are disabled by default (not included in `COMPOSE_PROFILES`). Running them as persistent Compose services consumes VRAM that `llama-swap` cannot reclaim. On a 128 GB GB10 this leaves less headroom for other models and can cause out-of-memory crashes. Add a service's profile to `COMPOSE_PROFILES` in `.env` only if you need a model permanently hot in VRAM and accept the reduced headroom for llama-swap.
 
 ---
 
@@ -80,28 +82,46 @@ Choose one of two setup paths:
 
 ### 🚀 Option 1: Automated Setup (Recommended for First-Time Users)
 
-**Time: ~5 minutes of guided prompts**
+**Time: ~5 minutes of guided prompts + image build time**
 
-The interactive setup wizard handles everything automatically:
+The interactive setup wizard generates your config. After that you need to build the images, download models, and start the stack:
 
 ```bash
 git clone https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama.git
 cd dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama
 
-# Run the interactive setup wizard
+# 1. Run the interactive setup wizard (generates .env and docker-compose.yml)
 ./setup/setup.sh
 
-# Auto-download models based on your tier selections
+# 2. Review the generated files before proceeding
+cat .env
+cat docker-compose.yml
+
+# 3. Copy and configure the llama-swap model config
+cp llama-swap/config.yaml.sample llama-swap/config.yaml
+
+# 4. Build the ephemeral vLLM images from the submodule (one-time, ~30-60 min)
+git submodule update --init --recursive
+cd vllm/build/spark-vllm-docker
+./build-and-copy.sh              # vllm-node:latest         (most models)
+./build-and-copy.sh --tf5        # vllm-node-tf5:latest     (Mamba/hybrid models)
+./build-and-copy.sh --exp-mxfp4  # vllm-node-mxfp4:latest   (GPT-OSS-120B MXFP4, optional)
+cd ../../..
+
+# 5. Build and push the five stack images to your registry
+./build_and_push.sh
+
+# 6. Auto-download models based on your tier selections
 ./setup/download-models.sh
 
-# Start the stack
+# 7. Start the stack (images are now in the registry and can be pulled)
 docker compose up -d
 ```
 
 **What the setup.sh script does:**
 - ✅ Verifies Docker & NVIDIA Container Runtime installation
 - ✅ Detects running services and available ports
-- ✅ Guides through service selection (Portainer, LiteLLM, llama.cpp, Ollama, llama-swap)
+- ✅ Guides through service selection (Portainer, LiteLLM, llama-swap, llama.cpp, Ollama, vLLM)
 - ✅ Collects credentials (HuggingFace token, GitHub PAT)
 - ✅ Auto-resolves port conflicts with custom alternatives
 - ✅ Lets you choose model tiers (S/M/L/GGUF)
@@ -242,13 +262,6 @@ Copy the full sample config (it contains all models pre-configured with correct 
 cp llama-swap/config.yaml.sample llama-swap/config.yaml
 ```
 
-Then do a global replace of `/path/to/` with your actual `LLM_ROOT_PATH`:
-
-```bash
-sed -i "s|/path/to/LLMs|$LLM_ROOT_PATH|g" llama-swap/config.yaml
-sed -i "s|/path/to/Docker|$HOME/Docker|g" llama-swap/config.yaml
-```
-
 The sample covers all models in the tier table above. Key structural rules:
 - `swap: false` keeps all group members loaded simultaneously.
 - `exclusive: true` on the `large-models` group evicts S and M tiers automatically when any 120B+ model loads.
@@ -285,7 +298,7 @@ Verify services are running:
 docker compose ps
 ```
 
-Expected output shows all services running (LiteLLM, llama-swap, Ollama, PostgreSQL, etc.).
+Expected output shows the services whose profiles are active in `COMPOSE_PROFILES`. A default `setup.sh` run enabling litellm and llama-swap will show `litellm`, `llama-swap`, and `litellm-postgres`.
 
 ---
 
@@ -475,17 +488,27 @@ All image references expand `${REGISTRY}` and `${IMAGE_NAMESPACE}` from `.env`, 
 
 ```yaml
 services:
-  vllm:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/vllm-spark:latest
-  llama-server:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
-  llama-swap:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-swap-spark:latest
-  ollama:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/ollama-spark:latest
   litellm:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:latest
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/litellm-spark:latest
+    profiles: [litellm]
+  litellm-db:
+    image: postgres:15-alpine
+    profiles: [litellm]
+  llama-swap:
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/llama-swap-spark:latest
+    profiles: [llama-swap]
+  llama-server:                          # persistent GGUF engine
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/llama-cpp-spark:latest
+    profiles: [llama-server]
+  ollama:                                # persistent Ollama service
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/ollama-spark:latest
+    profiles: [ollama]
+  vllm:                                  # persistent vLLM sidecar
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/vllm-spark:latest
+    profiles: [vllm]
 ```
+
+Which services start is controlled by `COMPOSE_PROFILES` in `.env` — `setup.sh` sets this automatically based on your selections. To enable a persistent inference service manually, add its profile name to `COMPOSE_PROFILES`. See the OOM risk note in the Stack overview for details.
 
 For non-ghcr.io registries, add to `.env`:
 
@@ -496,12 +519,7 @@ REGISTRY_USER=myuser
 REGISTRY_TOKEN=mytoken
 ```
 
-Then run the helper to rewrite the inline image strings inside `llama-swap/config.yaml` (the only place env-var expansion doesn't reach automatically):
-
-```bash
-./setup/rewrite-registry.sh            # applies changes
-./setup/rewrite-registry.sh --dry-run  # preview first
-```
+The `llama-swap/config.yaml` sample uses `${env.REGISTRY}/${env.IMAGE_NAMESPACE}` throughout, so llama-swap expands those at startup from the container's environment.
 
 ---
 

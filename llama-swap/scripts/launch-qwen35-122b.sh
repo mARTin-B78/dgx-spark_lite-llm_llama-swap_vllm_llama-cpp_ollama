@@ -44,15 +44,15 @@ exec docker run --rm --name "vllm-qwen3.5-122b-${PORT}" \
     --runtime nvidia --gpus all --ipc=host --network container:llama-swap \
     -e NVIDIA_DISABLE_FORWARD_COMPATIBILITY=1 \
     -e VLLM_MARLIN_USE_ATOMIC_ADD=1 \
-    -v "${LLM_ROOT_PATH:-/home/sparky/LLMs/vllm}:/models/vllm" \
-    -v "/home/sparky/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/vllm/build/spark-vllm-docker/mods:/mods" \
+    -v "${LLM_ROOT_PATH:-/home/user/LLMs}/vllm:/models/vllm" \
+    -v "${REPO_CONFIG_PATH:-/home/user/Docker/dgx-spark_master_stack}/vllm/build/spark-vllm-docker/mods:/mods" \
     --entrypoint /bin/bash \
     vllm-node:latest \
-    -c "cd /mods/fix-qwen3.5-autoround && ./run.sh && exec vllm serve /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound \
+    -c "cd /mods/fix-qwen3.5-autoround && bash ./run.sh && exec vllm serve /models/vllm/Intel/Qwen3.5-122B-A10B-int4-AutoRound \
     --served-model-name Qwen3.5-122B-A10B-int4-AutoRound \
-    --chat-template /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound/chat_template-tool-strict.jinja \
-    --host "${HOST}" --port "${PORT}" \
-    --gpu-memory-utilization "${GMEM}" \
+    --chat-template /models/vllm/Intel/Qwen3.5-122B-A10B-int4-AutoRound/chat_template.jinja \
+    --host ${HOST} --port ${PORT} \
+    --gpu-memory-utilization ${GMEM} \
     --max-model-len 131072 \
     --max-num-seqs 3 \
     --max-num-batched-tokens 8192 \
@@ -65,5 +65,5 @@ exec docker run --rm --name "vllm-qwen3.5-122b-${PORT}" \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
-    --speculative-config '{"method":"dflash","model":"z-lab/Qwen3.5-122B-A10B-DFlash","num_speculative_tokens":15}' \
-    --default-chat-template-kwargs '{"enable_thinking": true}'"
+    --speculative-config '{\"method\":\"dflash\",\"model\":\"z-lab/Qwen3.5-122B-A10B-DFlash\",\"num_speculative_tokens\":15}' \
+    --default-chat-template-kwargs '{\"enable_thinking\": true}'"
