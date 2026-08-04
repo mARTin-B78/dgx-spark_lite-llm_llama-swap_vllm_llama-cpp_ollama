@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.4] — 2026-08-04
+
+### Added
+- **`scripts/recipe_tool.py`** & **`scripts/recipe.sh`**: recipe import/export for
+  `llama-swap/config.yaml` model blocks. `recipe.sh export <model>` writes a model's
+  `cmd`/`ttl`/`checkEndpoint`/`proxy`/etc. block to a standalone, versionable file
+  under `recipes/`; `recipe.sh import <recipe-file>` applies it back into
+  `config.yaml` (dry-run diff by default, `--apply` to write, auto-backs up the
+  config first). Round-trips comments and block-scalar (`>`) formatting elsewhere
+  in the file via `ruamel.yaml`, so importing/exporting a single model doesn't
+  disturb the rest of a hand-maintained config.
+- **`llama-swap/scripts/lib-wait-mem-stable.sh`**: shared `wait_for_stable_memory`
+  helper, sourced by all three vLLM launch scripts (`launch-vllm-auto.sh`,
+  `launch-qwen35-122b.sh`, `launch-qwen35-122b-hybrid.sh`). Polls `MemAvailable`
+  until two consecutive readings agree, guarding against a launch reading a
+  `/proc/meminfo` snapshot taken mid-teardown of the previous model's container
+  (docker/CUDA context release is async, so an immediate read can undercount
+  free memory or race an in-flight unload).
+
+---
+
 ## [0.10.3] — 2026-07-06
 
 ### Changed

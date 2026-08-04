@@ -52,6 +52,14 @@ HOST="${2}"
 # factors. The model LOADS successfully but does not produce usable output —
 # do not benchmark quality/tool-use until this is root-caused or the
 # checkpoint is rebuilt.
+#
+# Wait for MemAvailable to settle before sampling it — a just-stopped model
+# container's CUDA context/page cache release is async, so reading right at
+# launch can undercount free memory or race an in-flight teardown.
+# shellcheck source=./lib-wait-mem-stable.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-wait-mem-stable.sh"
+wait_for_stable_memory
+
 MEM_AVAIL_KB=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
 MEM_TOTAL_KB=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
 

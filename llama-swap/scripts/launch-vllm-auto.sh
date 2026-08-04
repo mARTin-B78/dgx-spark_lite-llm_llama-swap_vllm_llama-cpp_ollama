@@ -75,6 +75,15 @@ SYSTEM_RAM_CEILING_GIB="${SYSTEM_RAM_CEILING_GIB:-117.81}"
 # in a useful range without blocking the launch.
 KV_BATCH_REALISTIC="${KV_BATCH_REALISTIC:-4}"
 
+# Wait for MemAvailable to settle before any sizing decision (adaptive or
+# static-override) — a just-stopped model container's CUDA context/page
+# cache release is async, so reading right at launch can undercount free
+# memory or race an in-flight teardown. Cheap (default: settles in ~2s when
+# nothing is in flight, capped at 20s).
+# shellcheck source=./lib-wait-mem-stable.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-wait-mem-stable.sh"
+wait_for_stable_memory
+
 # ── Static-override fast path ─────────────────────────────────────────────────
 # When GMEM_OVERRIDE is a number, skip the entire adaptive calculation and
 # pin gpu_memory_utilization to that value. Anything else (unset, empty,

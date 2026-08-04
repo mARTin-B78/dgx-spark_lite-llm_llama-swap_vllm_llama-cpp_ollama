@@ -19,6 +19,14 @@ HOST="${2}"
 # consume ~11 GiB not reflected in MemAvailable (observed: 98.8 GiB available
 # but only 87.59 GiB free in CUDA). 14 GiB buffer keeps us safely below that.
 # Floor 0.55 accommodates the always-on 4B service + TTS consuming ~48 GiB.
+#
+# Wait for MemAvailable to settle before sampling it — a just-stopped model
+# container's CUDA context/page cache release is async, so reading right at
+# launch can undercount free memory or race an in-flight teardown.
+# shellcheck source=./lib-wait-mem-stable.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-wait-mem-stable.sh"
+wait_for_stable_memory
+
 MEM_AVAIL_KB=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
 MEM_TOTAL_KB=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
 
@@ -31,7 +39,7 @@ GMEM=$(awk -v a="${MEM_AVAIL_KB:-0}" -v t="${MEM_TOTAL_KB:-134217728}" 'BEGIN {
     free_gib    = avail_gib - overhead - 14;
     if (free_gib < 0) free_gib = 0;
     u = free_gib / cuda_total;
-    if (u > 0.85) u = 0.85;
+    if (u > 0.74) u = 0.74;
     if (u < 0.55) u = 0.55;
     printf "%.2f", u;
 }')
@@ -48,12 +56,12 @@ exec docker run --rm --name "vllm-qwen3.5-122b-${PORT}" \
     -v "/home/sparky/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/vllm/build/spark-vllm-docker/mods:/mods" \
     --entrypoint /bin/bash \
     vllm-node:latest \
-    -c "cd /mods/fix-qwen3.5-autoround && ./run.sh && exec vllm serve /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound \
+    -c "cd /mods/fix-qwen3.5-autoround && bash ./run.sh && exec vllm serve /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound \
     --served-model-name Qwen3.5-122B-A10B-int4-AutoRound \
     --chat-template /models/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound/chat_template-tool-strict.jinja \
     --host "${HOST}" --port "${PORT}" \
     --gpu-memory-utilization "${GMEM}" \
-    --max-model-len 131072 \
+    --max-model-len 8192 \
     --max-num-seqs 3 \
     --max-num-batched-tokens 8192 \
     --max-cudagraph-capture-size 10 \

@@ -1,0 +1,9 @@
+recipe_version: '1'
+name: DeepSeek-V4-Flash-IQ2XXS-DS4
+exported_at: '2026-08-04T22:35:32'
+source: llama-swap/config.yaml
+model:
+  cmd: "sleep infinity"
+  proxy: "http://192.168.178.8:18004"
+  checkEndpoint: "/v1/models"
+  ttl: 0

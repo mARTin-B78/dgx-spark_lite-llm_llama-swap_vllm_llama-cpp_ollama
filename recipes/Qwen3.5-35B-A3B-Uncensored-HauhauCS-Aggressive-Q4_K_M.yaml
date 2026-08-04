@@ -1,0 +1,24 @@
+recipe_version: '1'
+name: Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M
+exported_at: '2026-08-04T22:35:32'
+source: llama-swap/config.yaml
+model:
+  ttl: 0
+  readyTimeout: 300
+  checkEndpoint: "/health"
+  cmd: >
+    docker run --rm --name llamacpp-qwen-${PORT}
+    --runtime nvidia --gpus all --ipc host --network container:llama-swap
+    --ulimit memlock=-1 --ulimit stack=67108864
+    --security-opt seccomp=unconfined
+    -e GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+    -v /home/sparky/LLMs/ollama:/models/ollama
+    ghcr.io/martin-b78/llama-cpp-spark:latest
+    -m /models/ollama/Alibaba/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf
+    --alias Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M
+    --port ${PORT} --host ${host}
+    --ctx-size 131072 --n-gpu-layers 99 --parallel 4 --no-mmap
+    --jinja
+    --chat-template-file /models/ollama/Alibaba/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive/custom_chat_template-tool-strict.jinja
+    --chat-template-kwargs '{"enable_thinking":false}'
+  cmdStop: "docker stop llamacpp-qwen-${PORT}"
