@@ -11,6 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.5] — 2026-08-04
+
+### Added
+- **`scripts/recipe_tool.py import-sparkrun`**: translate an upstream
+  [sparkrun/spark-arena recipe](https://sparkrun.dev/recipes/format/)
+  (`model`/`runtime`/`container`/`defaults`/`command` with `{placeholder}`
+  substitution) directly into a `llama-swap` `config.yaml` model block —
+  `{port}`/`{host}` map to llama-swap's own `${PORT}`/`${host}` launch macros
+  rather than the recipe's literal defaults, every other placeholder bakes in
+  from `defaults`, and the container is wrapped with this stack's usual
+  `--runtime nvidia --gpus all --ipc=host --network container:llama-swap`
+  plus an HF cache mount (sparkrun recipes assume the runtime downloads the
+  model by HF id on first launch). Supports `vllm` and `llama-cpp` runtimes —
+  the two this stack already knows how to run; other runtimes are rejected
+  with a clear error rather than producing something broken. Same dry-run/
+  `--apply`/auto-backup behavior as `import`.
+
+---
+
 ## [0.10.4] — 2026-08-04
 
 ### Added

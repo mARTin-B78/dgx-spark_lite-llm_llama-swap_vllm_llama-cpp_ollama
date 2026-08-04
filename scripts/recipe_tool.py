@@ -9,6 +9,10 @@ hand-editing the live llama-swap config.yaml.
     recipe_tool.py export <model-name>     # config.yaml -> recipes/<model>.yaml
     recipe_tool.py import <recipe-file>    # recipes/<model>.yaml -> config.yaml (dry-run by default)
     recipe_tool.py import <recipe-file> --apply   # actually write it (backs up config.yaml first)
+    recipe_tool.py import-sparkrun <sparkrun-recipe.yaml> [--as NAME] [--apply]
+                                            # translate an upstream sparkrun/spark-arena
+                                            # recipe.yaml (https://sparkrun.dev/recipes/format/)
+                                            # into a llama-swap model block
     recipe_tool.py list                    # list recipes/ contents
 
 Round-trips comments and block-scalar (">"/"|") formatting in config.yaml via
@@ -17,6 +21,8 @@ ruamel.yaml, so importing/exporting doesn't scramble the surrounding file.
 import argparse
 import datetime
 import os
+import re
+import shlex
 import shutil
 import sys
 
@@ -84,35 +90,30 @@ def cmd_export(args):
     print(f"exported: {out_path}")
 
 
-def cmd_import(args):
-    recipe = load(args.recipe)
-    name = recipe.get("name")
-    block = strip_comments(recipe.get("model"))
-    if not name or block is None:
-        sys.exit(f"error: {args.recipe} is missing required 'name' or 'model' field")
-
-    cfg = load(args.config)
+def preview_or_apply(config_path, name, block, apply):
+    """Shared diff/write logic for both `import` and `import-sparkrun`."""
+    cfg = load(config_path)
     models = cfg.setdefault("models", {})
     existing_raw = models.get(name)
     existing = strip_comments(existing_raw) if existing_raw is not None else None
 
     if existing == block:
-        print(f"no changes: '{name}' already matches {args.recipe}")
+        print(f"no changes: '{name}' already matches")
         return
 
-    if not args.apply:
-        print(f"--- current models.{name} ({args.config}) ---")
+    if not apply:
+        print(f"--- current models.{name} ({config_path}) ---")
         if existing is None:
             print("(not present)")
         else:
             dump({name: existing}, sys.stdout)
-        print(f"\n--- recipe models.{name} ({args.recipe}) ---")
+        print(f"\n--- new models.{name} ---")
         dump({name: block}, sys.stdout)
-        print(f"\n(dry run — rerun with --apply to write this into {args.config})")
+        print(f"\n(dry run — rerun with --apply to write this into {config_path})")
         return
 
-    backup = f"{args.config}.bak.{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    shutil.copy2(args.config, backup)
+    backup = f"{config_path}.bak.{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    shutil.copy2(config_path, backup)
 
     # Mutate the existing submap in place rather than replacing it outright —
     # ruamel can attach trailing/neighboring file comments to a submap object
@@ -125,9 +126,115 @@ def cmd_import(args):
     else:
         models[name] = block
 
-    dump(cfg, args.config)
-    print(f"applied: models.{name} updated in {args.config}")
+    dump(cfg, config_path)
+    print(f"applied: models.{name} updated in {config_path}")
     print(f"backup saved: {backup}")
+
+
+def cmd_import(args):
+    recipe = load(args.recipe)
+    name = recipe.get("name")
+    block = strip_comments(recipe.get("model"))
+    if not name or block is None:
+        sys.exit(f"error: {args.recipe} is missing required 'name' or 'model' field")
+    preview_or_apply(args.config, name, block, args.apply)
+
+
+SUPPORTED_SPARKRUN_RUNTIMES = ("vllm", "llama-cpp")
+
+
+def build_block_from_sparkrun(recipe, name, network, hf_cache):
+    """Translate a sparkrun/spark-arena recipe (https://sparkrun.dev/recipes/format/)
+    into a llama-swap model block.
+
+    sparkrun recipes describe one runtime process directly (model, container,
+    defaults, a `command:` template with {placeholder} substitution). llama-swap
+    instead wants a full `docker run ...` string per model, with ${PORT}/${host}
+    filled in by llama-swap itself at launch time — so {port}/{host} placeholders
+    are mapped to those macros (never baked to the recipe's literal defaults),
+    and every other {placeholder} is substituted from `defaults`.
+    """
+    runtime = recipe.get("runtime")
+    if runtime not in SUPPORTED_SPARKRUN_RUNTIMES:
+        sys.exit(
+            f"error: runtime '{runtime}' isn't one this stack knows how to run "
+            f"(supported: {', '.join(SUPPORTED_SPARKRUN_RUNTIMES)}) — "
+            "translate it by hand into a config.yaml cmd block instead"
+        )
+
+    container = recipe.get("container")
+    model = recipe.get("model")
+    command_tmpl = recipe.get("command")
+    if not container or not model or not command_tmpl:
+        sys.exit("error: recipe is missing required 'container', 'model', or 'command' field")
+
+    defaults = dict(recipe.get("defaults") or {})
+    env = recipe.get("env") or {}
+
+    fmt_vars = dict(defaults)
+    fmt_vars["model"] = model
+    fmt_vars["port"] = "${PORT}"
+    fmt_vars["host"] = "${host}"
+
+    # Flatten the command template to one space-joined line: sparkrun recipes
+    # write it with `\`-continued lines for human readability, but those
+    # backslashes are meaningless (and unsafe) once embedded in a quoted
+    # `bash -c '...'` string below, so collapse whitespace instead of
+    # preserving the line breaks.
+    flat = re.sub(r"\\\s*\n\s*", " ", command_tmpl).strip()
+    flat = re.sub(r"\s+", " ", flat)
+    try:
+        command = flat.format(**fmt_vars)
+    except KeyError as e:
+        sys.exit(f"error: recipe command references undefined placeholder {{{e.args[0]}}} (not in defaults)")
+
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "-", name)
+    container_name = f"sparkrun-{safe_name}-${{PORT}}"
+
+    parts = [
+        f"docker run --rm --name {container_name}",
+        f"--runtime nvidia --gpus all --ipc=host --network {network}",
+    ]
+    for k, v in env.items():
+        parts.append(f"-e {k}={shlex.quote(str(v))}")
+    # sparkrun recipes assume the runtime downloads the model by HF id on
+    # first launch — mount the host HF cache so that download only happens
+    # once instead of on every container start.
+    parts.append(f"-v {hf_cache}:/root/.cache/huggingface")
+    parts.append(f"--entrypoint /bin/bash {container}")
+    parts.append(f"-c {shlex.quote(command)}")
+
+    # Joined with plain spaces, NOT embedded newlines: a FoldedScalarString
+    # built from a Python string containing literal "\n" forces ruamel to
+    # preserve those exact newlines on dump (via blank-line escaping, per
+    # YAML folding rules) so the string round-trips byte-for-byte. That
+    # would land real newlines in the middle of this shell command, which
+    # splits it into multiple invalid statements when llama-swap execs it.
+    # A single space-joined line has no such ambiguity.
+    full_cmd = " ".join(parts)
+
+    block = {
+        "ttl": 0,
+        # First launch may need to download the model from HF — generous
+        # timeout so that doesn't get mistaken for a hung/crashed container.
+        "readyTimeout": 1200,
+        "checkEndpoint": "/health",
+        "cmd": full_cmd,
+        "cmdStop": f"docker stop {container_name}",
+    }
+    return block
+
+
+def cmd_import_sparkrun(args):
+    recipe = load(args.recipe)
+    name = args.as_name or (recipe.get("defaults") or {}).get("served_model_name") \
+        or re.sub(r"^.*/", "", str(recipe.get("model") or "")) \
+        or None
+    if not name:
+        sys.exit("error: couldn't derive a model name — pass --as <name>")
+
+    block = build_block_from_sparkrun(recipe, name, args.network, args.hf_cache)
+    preview_or_apply(args.config, name, block, args.apply)
 
 
 def cmd_list(args):
@@ -157,6 +264,17 @@ def main():
     pi.add_argument("recipe", help="path to a recipe .yaml file")
     pi.add_argument("--apply", action="store_true", help="write the change (default: dry-run diff only)")
     pi.set_defaults(func=cmd_import)
+
+    ps = sub.add_parser(
+        "import-sparkrun",
+        help="translate an upstream sparkrun/spark-arena recipe.yaml into a config.yaml model block",
+    )
+    ps.add_argument("recipe", help="path to a sparkrun-format recipe .yaml file")
+    ps.add_argument("--as", dest="as_name", default=None, help="model name to use in config.yaml (default: served_model_name or the HF repo's last path segment)")
+    ps.add_argument("--network", default="container:llama-swap", help="docker --network value (default: container:llama-swap)")
+    ps.add_argument("--hf-cache", default=os.path.expanduser("~/.cache/huggingface"), help="host path to mount as the container's HF cache (default: ~/.cache/huggingface)")
+    ps.add_argument("--apply", action="store_true", help="write the change (default: dry-run diff only)")
+    ps.set_defaults(func=cmd_import_sparkrun)
 
     pl = sub.add_parser("list", help="list available recipe files")
     pl.set_defaults(func=cmd_list)
