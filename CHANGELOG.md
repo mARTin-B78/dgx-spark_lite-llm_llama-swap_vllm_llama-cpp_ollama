@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.11.1] — 2026-08-11
+
+### Fixed
+- **`benchmark-models.sh`**: replaced `eval` of hand-built command strings in
+  `run_benchy`/`run_quality` with array-based invocations. A model name (or
+  `--quality-extra-args` value) containing shell metacharacters could previously
+  be interpreted as shell code instead of a literal argument.
+- **`docker-compose.yml`/`.sample`**: restored the `${IMAGE_NAMESPACE:-${GH_USER}}`
+  fallback on all image references — it was accidentally dropped to a bare
+  `${IMAGE_NAMESPACE}` in 0.11.0, breaking image pulls for any `.env` that only
+  sets `GH_USER`.
+
+---
+
 ## [0.11.0] — 2026-08-11
 
 ### Added
@@ -335,7 +349,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 <!-- version diff links — update tags in GitHub after each release -->
-[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.0...v0.10.1
