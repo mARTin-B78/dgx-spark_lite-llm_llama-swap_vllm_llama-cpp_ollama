@@ -25,7 +25,7 @@ cd setup/
 **Time:** ~5 minutes of interactive prompts
 
 **Output files:**
-- `.env` - All paths, ports, and credentials
+- `.env` - All paths, ports, and credentials, including `LLM_OLLAMA_ROOT_PATH`
 - `docker-compose.yml` - Pre-configured service definitions
 - `setup/SETUP_SUMMARY.txt` - Your configuration reference
 
@@ -39,7 +39,7 @@ cd setup/
 1. Read [../TUTORIAL.md](../TUTORIAL.md) - Comprehensive step-by-step guide
 2. Manually edit `docker-compose.yml.sample` and rename to `docker-compose.yml`
 3. Create and configure `.env` file
-4. Set up model directories: `$HOME/LLMs/{vllm,ollama}`
+4. Set up model directories: `$HOME/LLMs/{vllm,ollama}` (or set `LLM_OLLAMA_ROOT_PATH` for a custom Ollama cache root)
 5. Download models using provided commands
 6. Start services with `docker compose up -d`
 

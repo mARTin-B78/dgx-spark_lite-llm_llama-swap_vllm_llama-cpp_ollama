@@ -78,6 +78,7 @@ macros:
 #    exclusive: true
 #    members:
 #      - Qwen3.5-122B-A10B-int4-AutoRound
+#      - Qwen3.5-122B-A10B-NVFP4
 #      - Nemotron-3-Super-120B-A12B-NVFP4
 #      - GPT-OSS-120B
 #      - Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8  # solo: gpu_mem 0.75 (91 GB) — recipe says 0.8 but ~28 GB system baseline forces lower
@@ -326,7 +327,7 @@ models:
       EXTRA_DOCKER_ARGS='-e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
       /app/scripts/launch-vllm-auto.sh
       --served-model-name Qwen3.6-35B-A3B-FP8 qwen3.6-35b-a3b
-      --chat-template /models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8/chat_template-tool-strict.jinja
+      --chat-template /models/vllm/Alibaba/Qwen3.6-35B-A3B-FP8/chat_template.jinja
       --max-num-batched-tokens 32768
       --attention-backend flashinfer
       --kv-cache-dtype fp8
@@ -337,6 +338,145 @@ models:
       --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
       --trust-remote-code
     cmdStop: "docker stop vllm-qwen3.6-35b-${PORT}"
+
+  # --- Qwen3.6-35B-A3B INT4 AutoRound (forum recipe, single Spark) ---
+  Qwen3.6-35B-A3B-int4-AutoRound:
+    ttl: 0
+    readyTimeout: 1200
+    checkEndpoint: "/health"
+    cmd: >
+      env
+      MODEL_PATH=/models/vllm/Intel/Qwen3.6-35B-A3B-int4-AutoRound
+      MODEL_HOST_PATH=/models/vllm/Intel/Qwen3.6-35B-A3B-int4-AutoRound
+      CONTAINER_NAME=vllm-qwen3.6-35b-int4-${PORT}
+      IMAGE=vllm-node-tf5:latest
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=262144 MAX_NUM_SEQS=4 KV_DTYPE_BYTES=1
+      GMEM_OVERRIDE=0.70
+      EXTRA_DOCKER_ARGS='-e VLLM_USE_DEEP_GEMM=0 -v <REPO_CONFIG_PATH>/vllm/build/spark-vllm-docker/mods:/mods:ro -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
+      PRE_LAUNCH_CMD='export WORKSPACE_DIR=/models && cd /mods/fix-qwen3.5-chat-template && bash ./run.sh'
+      /app/scripts/launch-vllm-auto.sh
+      --served-model-name Qwen3.6-35B-A3B-int4-AutoRound
+      --chat-template /models/unsloth.jinja
+      --max-num-batched-tokens 8192
+      --load-format fastsafetensors
+      --enable-prefix-caching
+      --enable-chunked-prefill
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --reasoning-parser qwen3
+      --trust-remote-code
+      -tp 2
+      --distributed-executor-backend ray
+    cmdStop: "docker stop vllm-qwen3.6-35b-int4-${PORT}"
+
+  # --- Qwen3.6-35B PrismaQuant (4.75bit) ---
+  Qwen3.6-35B-A3B-PrismaQuant-4.75bit:
+    ttl: 0
+    readyTimeout: 1200
+    checkEndpoint: "/health"
+    cmd: >
+      env
+      MODEL_PATH=/models/vllm/rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm
+      MODEL_HOST_PATH=/models/rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm
+      CONTAINER_NAME=vllm-qwen3.6-35b-pq-${PORT}
+      IMAGE=vllm-node-tf5:latest
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=262144 MAX_NUM_SEQS=4 KV_DTYPE_BYTES=1
+      GMEM_OVERRIDE=0.6
+      EXTRA_DOCKER_ARGS='-e NVIDIA_FORWARD_COMPAT=1 -e VLLM_MARLIN_USE_ATOMIC_ADD=1 -e FLASHINFER_DISABLE_VERSION_CHECK=1 -e TORCH_MATMUL_PRECISION=high'
+      /app/scripts/launch-vllm-auto.sh
+      --served-model-name Qwen3.6-35B-A3B-PrismaQuant-4.75bit qwen3.6-35b
+      --max-num-batched-tokens 32768
+      --quantization compressed-tensors
+      --kv-cache-dtype fp8
+      --load-format fastsafetensors
+      --attention-backend flashinfer
+      --enable-prefix-caching
+      --enable-chunked-prefill
+      --trust-remote-code
+      --reasoning-parser qwen3
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+    cmdStop: "docker stop vllm-qwen3.6-35b-pq-${PORT}"
+
+  # --- AEON-7 DGX Spark DFlash path ---
+  # Mirrors the AEON repo's DGX Spark quickstart:
+  # - aeon-vllm-ultimate:latest image
+  # - Multimodal-NVFP4-MTP-XS body
+  # - z-lab/Qwen3.5-27B-DFlash drafter
+  # The image entrypoint is bash, so PRE_LAUNCH_CMD forces the launcher into
+  # a shell before `vllm serve`.
+  Qwen3.6-27B-AEON-Ultimate-Uncensored-DFlash:
+    ttl: 0
+    readyTimeout: 1200
+    checkEndpoint: "/health"
+    cmd: >
+      env
+      MODEL_PATH=/models/vllm/AEON-7/Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP
+      MODEL_HOST_PATH=<LLM_ROOT_PATH>/vllm/AEON-7/Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP
+      CONTAINER_NAME=vllm-aeon-ultimate-${PORT}
+      IMAGE=ghcr.io/aeon-7/aeon-vllm-ultimate:latest
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=200000 MAX_NUM_SEQS=16 KV_DTYPE_BYTES=2
+      GMEM_OVERRIDE=0.70
+      EXTRA_DOCKER_ARGS='-e NVIDIA_FORWARD_COMPAT=1 -e ENABLE_NVFP4_SM100=0 -e VLLM_USE_FLASHINFER_SAMPLER=1 -e VLLM_NVFP4_GEMM_BACKEND=flashinfer-cutlass'
+      PRE_LAUNCH_CMD='true'
+      /app/scripts/launch-vllm-auto.sh
+      --served-model-name Qwen3.6-27B-AEON-Ultimate-Uncensored-DFlash
+      --chat-template /models/vllm/AEON-7/Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP/chat_template.jinja
+      --quantization compressed-tensors
+      --mamba-cache-dtype float32
+      --max-num-batched-tokens 16384
+      --enable-chunked-prefill
+      --enable-prefix-caching
+      --trust-remote-code
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --reasoning-parser qwen3
+      --limit-mm-per-prompt '{"image": 4, "video": 2}'
+      --mm-encoder-tp-mode data
+      --mm-processor-cache-type shm
+      --speculative-config.method dflash
+      --speculative-config.model z-lab/Qwen3.5-27B-DFlash
+      --speculative-config.num_speculative_tokens 10
+    cmdStop: "docker stop vllm-aeon-ultimate-${PORT}"
+
+  # --- AEON-7 Multimodal NVFP4-MTP (special raw vLLM container) ---
+  # Raw AEON vLLM container, wired to the local /model and /drafter paths.
+  Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP:
+    ttl: 0
+    readyTimeout: 1200
+    checkEndpoint: "/health"
+    cmd: >
+      docker run --rm --name vllm-aeon-mtp-${PORT}
+      --gpus all --ipc host --network host
+      -e NVIDIA_FORWARD_COMPAT=1
+      -e ENABLE_NVFP4_SM100=0
+      -e VLLM_USE_FLASHINFER_SAMPLER=1
+      -e VLLM_NVFP4_GEMM_BACKEND=flashinfer-cutlass
+      -v /home/sparky/LLMs/vllm/AEON-7/Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP:/model:ro
+      -v /home/sparky/LLMs/vllm/z-lab/Qwen3.5-27B-DFlash:/drafter:ro
+      --entrypoint vllm
+      ghcr.io/aeon-7/aeon-vllm-ultimate:latest
+      serve /model
+      --host 0.0.0.0 --port ${PORT}
+      --served-model-name Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP
+      --quantization modelopt
+      --mamba-cache-dtype float32
+      --reasoning-parser qwen3
+      --tool-call-parser qwen3_coder
+      --enable-auto-tool-choice
+      --limit-mm-per-prompt '{"image":4,"video":2}'
+      --mm-encoder-tp-mode data
+      --max-num-seqs 16
+      --max-num-batched-tokens 16384
+      --gpu-memory-utilization 0.70
+      --enable-chunked-prefill
+      --enable-prefix-caching
+      --trust-remote-code
+      --speculative-config '{"method":"dflash","model":"/drafter","num_speculative_tokens":10}'
+    cmdStop: "docker stop vllm-aeon-mtp-${PORT}"
 
   # --- Qwen3.6-27B PrismaSCOUT (Blackwell NVFP4+BF16 mixed, compressed-tensors) ---
   # ~20 GiB weights, GSM8K 96.66%, MTP speculative decoding k=1.
@@ -400,6 +540,45 @@ models:
     checkEndpoint: "/health"
     cmd: /app/scripts/launch-qwen35-122b.sh ${PORT} ${host}
     cmdStop: "docker stop vllm-qwen3.5-122b-${PORT}"
+
+  # --- Qwen3.5-122B-A10B-NVFP4 (txn545 DGX Spark checkpoint) ---
+  # Forum-recommended single-Spark path.
+  # Use the txn545 checkpoint on GB10: it includes the MTP weights required
+  # for speculative decoding and tracks the known-working upstream recipe.
+  # Needs the tf5 vLLM image plus the runtime patch script below to register
+  # the custom qwen3_5_vl_moe model class before vLLM starts.
+  Qwen3.5-122B-A10B-NVFP4:
+    ttl: 0
+    readyTimeout: 2400
+    checkEndpoint: "/health"
+    cmd: >
+      env
+      MODEL_PATH=/models/vllm/txn545/Qwen3.5-122B-A10B-NVFP4
+      MODEL_HOST_PATH=/models/vllm/txn545/Qwen3.5-122B-A10B-NVFP4
+      CONTAINER_NAME=vllm-qwen3.5-122b-nvfp4-${PORT}
+      IMAGE=vllm-node-tf5:latest
+      PORT=${PORT} HOST=${host}
+      MAX_MODEL_LEN=262144 MAX_NUM_SEQS=4 KV_DTYPE_BYTES=1
+      GMEM_OVERRIDE=0.85
+      PRE_LAUNCH_CMD='bash /mod/patch-qwen35-nvfp4-runtime.sh'
+      EXTRA_DOCKER_ARGS='-e VLLM_USE_FLASHINFER_MOE_FP4=0 -e VLLM_NVFP4_MOE_FORCE_MARLIN=0 -v <REPO_CONFIG_PATH>/llama-swap/scripts/patch-qwen35-nvfp4-runtime.sh:/mod/patch-qwen35-nvfp4-runtime.sh:ro'
+      /app/scripts/launch-vllm-auto.sh
+      --served-model-name Qwen3.5-122B-A10B-NVFP4
+      --chat-template /models/vllm/txn545/Qwen3.5-122B-A10B-NVFP4/chat_template.jinja
+      --dtype auto
+      --trust-remote-code
+      --load-format safetensors
+      --kv-cache-dtype fp8
+      --enable-prefix-caching
+      --enable-chunked-prefill
+      --max-num-batched-tokens 8192
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --reasoning-parser qwen3
+      --no-enable-flashinfer-autotune
+      --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
+      --default-chat-template-kwargs '{"enable_thinking": false}'
+    cmdStop: "docker stop vllm-qwen3.5-122b-nvfp4-${PORT}"
 
   # --- Works - is for Visual Stuff with Pictures ---
   Qwen3-VL-30B-A3B-Instruct-FP8:
@@ -582,35 +761,35 @@ models:
     cmdStop: "docker stop vllm-nano4b-${PORT}"
 
   # --- spark-arena winner recipe: moe-backend cutlass, CUDA graphs, 57 tok/s ---
-  Nemotron-3-Nano-30B-A3B-NVFP4:
-    ttl: 0
-    readyTimeout: 600
-    checkEndpoint: "/health"
-    cmd: >
-      env
-      MODEL_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
-      MODEL_HOST_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
-      CONTAINER_NAME=vllm-nemotron-${PORT}
-      IMAGE=vllm-node:latest
-      PORT=${PORT} HOST=${host}
-      MAX_MODEL_LEN=131072 MAX_NUM_SEQS=4 KV_DTYPE_BYTES=1
-      GMEM_MIN=0.40 GMEM_MAX=0.70 SAFETY_GIB=4
-      EXTRA_DOCKER_ARGS='-e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
-      /app/scripts/launch-vllm-auto.sh
-      --served-model-name Nemotron-3-Nano-30B-A3B-NVFP4
-      --chat-template /models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/chat_template-tool-strict.jinja
-      --kv-cache-dtype fp8
-      --moe-backend cutlass
-      --load-format fastsafetensors
-      --trust-remote-code
-      --enable-prefix-caching
-      --enable-chunked-prefill
-      --max-num-batched-tokens 8192
-      --enable-auto-tool-choice
-      --tool-call-parser qwen3_coder
-      --reasoning-parser-plugin /models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/nano_v3_reasoning_parser.py
-      --reasoning-parser nano_v3
-    cmdStop: "docker stop vllm-nemotron-${PORT}"
+  # Nemotron-3-Nano-30B-A3B-NVFP4:
+  #   ttl: 0
+  #   readyTimeout: 600
+  #   checkEndpoint: "/health"
+  #   cmd: >
+  #     env
+  #     MODEL_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
+  #     MODEL_HOST_PATH=/models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/snapshots/ab537beb128913d389306a4d0cc1a2097ac5a5af
+  #     CONTAINER_NAME=vllm-nemotron-${PORT}
+  #     IMAGE=vllm-node:latest
+  #     PORT=${PORT} HOST=${host}
+  #     MAX_MODEL_LEN=131072 MAX_NUM_SEQS=4 KV_DTYPE_BYTES=1
+  #     GMEM_MIN=0.40 GMEM_MAX=0.70 SAFETY_GIB=4
+  #     EXTRA_DOCKER_ARGS='-e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True -e OMP_NUM_THREADS=4'
+  #     /app/scripts/launch-vllm-auto.sh
+  #     --served-model-name Nemotron-3-Nano-30B-A3B-NVFP4
+  #     --chat-template /models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/chat_template-tool-strict.jinja
+  #     --kv-cache-dtype fp8
+  #     --moe-backend cutlass
+  #     --load-format fastsafetensors
+  #     --trust-remote-code
+  #     --enable-prefix-caching
+  #     --enable-chunked-prefill
+  #     --max-num-batched-tokens 8192
+  #     --enable-auto-tool-choice
+  #     --tool-call-parser qwen3_coder
+  #     --reasoning-parser-plugin /models/vllm/Nvidia/Nemotron-3-Nano-30B-A3B-NVFP4/nano_v3_reasoning_parser.py
+  #     --reasoning-parser nano_v3
+  #   cmdStop: "docker stop vllm-nemotron-${PORT}"
 
 # --- NVIDIA Nemotron-3 Nano-Omni (30B MoE multimodal: text+image+audio, FP8) ---
 # Adaptive --gpu-memory-utilization via launch-vllm-auto.sh.

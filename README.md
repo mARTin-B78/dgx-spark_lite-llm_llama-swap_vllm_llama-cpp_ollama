@@ -146,6 +146,7 @@ cp docker-compose.yml.sample docker-compose.yml
 
 Edit the placeholder values:
 - `<LLM_ROOT_PATH>` → Your model storage path (e.g., `/home/user/LLMs`)
+- `LLM_OLLAMA_ROOT_PATH` → Optional Ollama cache path; defaults to `$LLM_ROOT_PATH/ollama`
 - `<REPO_CONFIG_PATH>` → Repo root path (e.g., `/home/user/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama`)
 - `<YOUR_GITHUB_PAT>` → Your GitHub Personal Access Token (optional for local builds)
 - `<YOUR_POSTGRES_PASSWORD>` → Choose a secure database password
@@ -179,7 +180,7 @@ Used for: Qwen3.5-35B-FP8, Mistral-Small-24B, Nemotron-4B-FP8, Nemotron-30B-NVFP
 
 **Step 5 — Build `vllm-node-tf5` (transformers v5, Mamba/hybrid models)
 
-Required for: Qwen3.5-122B-A10B-int4-AutoRound, Qwen3-Coder-Next, and any other hybrid Mamba architecture.
+Required for: Qwen3.5-122B-A10B-int4-AutoRound, Qwen3.5-122B-A10B-NVFP4 (use the resharded sjug checkpoint), Qwen3-Coder-Next, and any other hybrid Mamba architecture.
 
 ```bash
 ./build-and-copy.sh --tf5

@@ -21,6 +21,7 @@
 #   ./benchmark-models.sh --extreme              # All three depth levels
 #   ./benchmark-models.sh --quick Nemotron       # Fast smoke test
 #   ./benchmark-models.sh --runs 5 Qwen3.5-35B   # Custom run count
+#   ./benchmark-models.sh --size-order ...       # Benchmark selected models small -> large
 #   ./benchmark-models.sh Qwen3.5 Nemotron       # Only matching models
 # =============================================================================
 
@@ -53,6 +54,7 @@ MODE="medium-log"
 CONCURRENCY=""   # space-separated list; empty = not passed to llama-benchy
 ARENA_DIR=""     # set by --arena mode
 FILTERS=()
+SORT_MODE="alpha" # alpha | size
 
 # Crash-resume tracking
 CHECKPOINT_DIR="$SCRIPT_DIR/test-results/checkpoints"
@@ -73,6 +75,38 @@ QUALITY_CONTEXT_SIZE=""       # --context-size
 QUALITY_EXTRA_ARGS=""         # catch-all for tunneled args
 QUALITY_DIR="$SCRIPT_DIR/test-results/quality"
 TOOLEVAL_CMD=""
+
+sort_models_by_size() {
+    awk '
+    function rank(model) {
+        if (model == "DeepSeek-V4-Flash-IQ2XXS-DS4") return 0
+        if (model == "Nemotron-3-Nano-4B-FP8") return 10
+        if (model == "Qwen3.5-4B-Q4_K_M") return 10
+        if (model == "Qwen3.5-27B-Uncensored-DFlash-NVFP4") return 20
+        if (model == "Qwen3.6-27B-AEON-Ultimate-Uncensored-DFlash") return 20
+        if (model == "Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP") return 20
+        if (model == "Qwen3.6-27B-PrismaSCOUT-NVFP4") return 20
+        if (model == "Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4") return 30
+        if (model == "Qwen3-Omni-30B-A3B-Instruct") return 30
+        if (model == "Qwen3-VL-30B-A3B-Instruct-FP8") return 30
+        if (model == "Qwen3.5-35B-A3B-FP8") return 40
+        if (model == "Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M") return 40
+        if (model == "Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF") return 40
+        if (model == "Qwen3.6-35B-A3B-FP8") return 40
+        if (model == "Qwen3.6-35B-A3B-PrismaQuant-4.75bit") return 40
+        if (model == "Qwen3.6-35B-A3B-int4-AutoRound") return 40
+        if (model == "GPT-OSS-120B") return 50
+        if (model == "Nemotron-3-Super-120B-A12B-NVFP4") return 50
+        if (model == "Qwen3.5-122B-A10B-heretic-v2-NVFP4") return 60
+        if (model == "Qwen3.5-122B-A10B-int4-AutoRound") return 60
+        if (model == "Qwen3.5-122B-A10B-NVFP4") return 60
+        if (model == "Qwen3-Coder-Next-FP8-Dynamic") return 70
+        if (model == "Qwen3-Coder-Next-int4-AutoRound") return 70
+        return 999
+    }
+    NF { print rank($0) "\t" $0 }
+    ' | sort -t "$(printf '\t')" -k1,1n -k2,2 | cut -f2-
+}
 
 # ---------------------------------------------------------------------------
 # Interactive wizard
@@ -509,6 +543,10 @@ while [[ $# -gt 0 ]]; do
             MODE="arena"
             shift
             ;;
+        --size-order)
+            SORT_MODE="size"
+            shift
+            ;;
         --runs)
             RUNS="$2"
             shift 2
@@ -599,6 +637,7 @@ Profiles (simulating real-world document workloads):
                system can process it without crashing or heavy swap.
 
   --quick      Smoke test — pp512, tg128, depth 0, 1 run
+  --size-order  Sort matched models from smallest to largest before running
   --full       Broad sweep — pp512+2048, tg128+256+512, depths 0-32k
   --arena      Spark-Arena leaderboard profile — exact spec from spark-arena.com/admin
                Saves results.csv + recipe.yaml per model to test-results/arena-submission/
@@ -634,6 +673,7 @@ Other options:
 Filters:
   Add model name fragments to only test matching models.
   Example: ./benchmark-models.sh --stress Qwen3.5 Nemotron
+  Example: ./benchmark-models.sh --quality --size-order Qwen3.5 Nemotron
 
 Environment:
   LLAMA_SWAP_URL  llama-swap endpoint (default: http://localhost:28080)
@@ -1094,6 +1134,40 @@ QUALITY_RESPONSE_MS=""        # median turn latency in seconds
 QUALITY_CTXPRESS=""           # context pressure %
 QUALITY_TOTAL_POINTS=""       # "12 / 12"
 QUALITY_CATS=""               # "Tool Selection 100%, Multi-Step Chains 100%"
+
+# Helper to look up the configured RAM budget / memory target for a model.
+# This is the closest thing the repo exposes to "how much RAM does this model
+# consume" and is the right thing to compare across the overnight run.
+get_model_ram_budget() {
+    local model="$1"
+    case "$model" in
+        DeepSeek-V4-Flash-IQ2XXS-DS4)                                 echo "proxy" ;;
+        Nemotron-3-Nano-4B-FP8)                                       echo "0.10-0.40" ;;
+        Qwen3.5-4B-Q4_K_M)                                            echo "llama.cpp" ;;
+        Qwen3.5-27B-Uncensored-DFlash-NVFP4)                          echo "0.70" ;;
+        Qwen3.6-27B-AEON-Ultimate-Uncensored-DFlash)                  echo "0.70" ;;
+        Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP)    echo "0.70" ;;
+        Qwen3.6-27B-PrismaSCOUT-NVFP4)                                echo "0.30-0.36" ;;
+        Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4)                 echo "0.65-0.85" ;;
+        Qwen3-Omni-30B-A3B-Instruct)                                  echo "0.60-0.75" ;;
+        Qwen3-VL-30B-A3B-Instruct-FP8)                                echo "0.40-0.65" ;;
+        Qwen3.5-35B-A3B-FP8)                                          echo "0.55-0.71" ;;
+        Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M)        echo "llama.cpp" ;;
+        Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF)   echo "llama.cpp" ;;
+        Qwen3.6-35B-A3B-FP8)                                          echo "0.55-0.71" ;;
+        Qwen3.6-35B-A3B-PrismaQuant-4.75bit)                          echo "0.60" ;;
+        Qwen3.6-35B-A3B-int4-AutoRound)                               echo "0.70" ;;
+        GPT-OSS-120B)                                                 echo "0.65-0.85" ;;
+        Nemotron-3-Super-120B-A12B-NVFP4)                             echo "0.65-0.85" ;;
+        Qwen3.5-122B-A10B-heretic-v2-NVFP4)                           echo "0.85" ;;
+        Qwen3.5-122B-A10B-int4-AutoRound)                             echo "0.60-0.85" ;;
+        Qwen3.5-122B-A10B-NVFP4)                                      echo "0.85" ;;
+        Qwen3-Coder-Next-FP8-Dynamic)                                 echo "0.75" ;;
+        Qwen3-Coder-Next-int4-AutoRound)                              echo "0.55-0.85" ;;
+        *)                                                            echo "unknown" ;;
+    esac
+}
+
 # Helper to look up max_len for a model. Mirrors the values in the RECIPES
 # dict inside generate_recipe_yaml (kept in sync manually — the previous
 # sed-extracts-then-exec approach broke on the first inner '}').
@@ -1101,18 +1175,27 @@ get_model_max_len() {
     local model="$1"
     case "$model" in
         Qwen3.5-35B-A3B-FP8)                                          echo 131072 ;;
+        Qwen3.5-27B-Uncensored-DFlash-NVFP4)                          echo 200000 ;;
+        Qwen3.6-27B-PrismaSCOUT-NVFP4)                                echo  32768 ;;
         Qwen3.5-122B-A10B-int4-AutoRound)                             echo  40960 ;;
+        Qwen3.5-122B-A10B-heretic-v2-NVFP4)                          echo 262144 ;;
+        Qwen3.5-122B-A10B-NVFP4)                                     echo 262144 ;;
         Qwen3-VL-30B-A3B-Instruct-FP8)                                echo  32768 ;;
         Qwen3-Omni-30B-A3B-Instruct)                                  echo  32768 ;;
         Qwen3-Coder-Next-FP8-Dynamic)                                 echo  32768 ;;
         Qwen3-Coder-Next-int4-AutoRound)                              echo  32768 ;;
         Nemotron-3-Nano-4B-FP8)                                       echo   8192 ;;
-        Nemotron-3-Nano-30B-A3B-NVFP4)                                echo 131072 ;;
         Nemotron-3-Super-120B-A12B-NVFP4)                             echo  65536 ;;
+        Qwen3.6-27B-AEON-Ultimate-Uncensored-DFlash)                  echo 229376 ;;
+        Qwen3.6-27B-AEON-Ultimate-Uncensored-NVFP4)                   echo 200000 ;;
+        Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP)    echo 229376 ;;
         GPT-OSS-120B)                                                 echo  65536 ;;
         Mistral-Small-24B-Instruct-2501)                              echo  32768 ;;
+        Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M)        echo  16384 ;;
         Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF)   echo  16384 ;;
+        Qwen3.6-35B-A3B-PrismaQuant-4.75bit)                          echo 262144 ;;
         Qwen3.6-35B-A3B-FP8)                                          echo 262144 ;;
+        Qwen3.6-35B-A3B-int4-AutoRound)                               echo 262144 ;;
         Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive)               echo  16384 ;;
         DeepSeek-V4-Flash-IQ2XXS-DS4)                                 echo  65536 ;;
         Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4)                 echo 131072 ;;
@@ -1471,6 +1554,105 @@ RECIPES = {
             "--reasoning-parser qwen3",
         ],
     },
+    "Qwen3.5-122B-A10B-NVFP4": {
+        "hf_model":    "txn545/Qwen3.5-122B-A10B-NVFP4",
+        "description": "Qwen3.5 122B NVFP4 — txn545 single-Spark MTP path",
+        "container":   "vllm-node-tf5:latest",
+        "tp": 1, "gpu_mem": 0.84, "max_len": 262144,
+        "env": {
+            "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+            "VLLM_NVFP4_MOE_FORCE_MARLIN": "0",
+        },
+        "extras": [
+            "--trust-remote-code",
+            "--dtype auto",
+            "--kv-cache-dtype fp8",
+            "--load-format safetensors",
+            "--enable-prefix-caching",
+            "--enable-chunked-prefill",
+            "--max-num-batched-tokens 8192",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_coder",
+            "--reasoning-parser qwen3",
+            "--no-enable-flashinfer-autotune",
+            "--speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":1}'",
+        ],
+    },
+    "Qwen3.6-27B-AEON-Ultimate-Uncensored-NVFP4": {
+        "hf_model":    "AEON-7/Qwen3.6-27B-AEON-Ultimate-Uncensored-NVFP4",
+        "description": "AEON Qwen3.6 27B NVFP4 — DGX Spark vLLM path with DFlash speculation",
+        "container":   "ghcr.io/aeon-7/aeon-vllm-ultimate:latest",
+        "tp": 1, "gpu_mem": 0.70, "max_len": 200000,
+        "env": {
+            "NVIDIA_FORWARD_COMPAT": "1",
+            "NVIDIA_DISABLE_REQUIRE": "1",
+            "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
+            "TORCH_CUDA_ARCH_LIST": "12.1a",
+            "TORCH_MATMUL_PRECISION": "high",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+            "ENABLE_NVFP4_SM100": "0",
+            "VLLM_USE_FLASHINFER_SAMPLER": "1",
+            "VLLM_USE_FLASHINFER_MOE_FP4": "0",
+            "VLLM_TEST_FORCE_FP8_MARLIN": "0",
+        },
+        "extras": [
+            "--dtype auto",
+            "--quantization compressed-tensors",
+            "--kv-cache-dtype auto",
+            "--mamba-cache-dtype float32",
+            "--enable-prefix-caching",
+            "--enable-chunked-prefill",
+            "--max-num-batched-tokens 16384",
+            "--load-format safetensors",
+            "--trust-remote-code",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_coder",
+            "--reasoning-parser qwen3",
+            "--attention-backend flash_attn",
+            '--limit-mm-per-prompt \'{"image": 4, "video": 2}\'',
+            "--mm-encoder-tp-mode data",
+            "--mm-processor-cache-type shm",
+            '--speculative-config \'{"method":"dflash","model":"/models/vllm/z-lab/Qwen3.5-27B-DFlash","num_speculative_tokens":10}\'',
+        ],
+    },
+    # Backward-compatible alias for older configs / local notes.
+    "Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP": {
+        "hf_model":    "AEON-7/Qwen3.6-27B-AEON-Ultimate-Uncensored-NVFP4",
+        "description": "AEON Qwen3.6 27B NVFP4 — DGX Spark vLLM path with DFlash speculation",
+        "container":   "ghcr.io/aeon-7/aeon-vllm-ultimate:latest",
+        "tp": 1, "gpu_mem": 0.70, "max_len": 200000,
+        "env": {
+            "NVIDIA_FORWARD_COMPAT": "1",
+            "NVIDIA_DISABLE_REQUIRE": "1",
+            "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
+            "TORCH_CUDA_ARCH_LIST": "12.1a",
+            "TORCH_MATMUL_PRECISION": "high",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+            "ENABLE_NVFP4_SM100": "0",
+            "VLLM_USE_FLASHINFER_SAMPLER": "1",
+            "VLLM_USE_FLASHINFER_MOE_FP4": "0",
+            "VLLM_TEST_FORCE_FP8_MARLIN": "0",
+        },
+        "extras": [
+            "--dtype auto",
+            "--quantization compressed-tensors",
+            "--kv-cache-dtype auto",
+            "--mamba-cache-dtype float32",
+            "--enable-prefix-caching",
+            "--enable-chunked-prefill",
+            "--max-num-batched-tokens 16384",
+            "--load-format safetensors",
+            "--trust-remote-code",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_coder",
+            "--reasoning-parser qwen3",
+            "--attention-backend flash_attn",
+            '--limit-mm-per-prompt \'{"image": 4, "video": 2}\'',
+            "--mm-encoder-tp-mode data",
+            "--mm-processor-cache-type shm",
+            '--speculative-config \'{"method":"dflash","model":"/models/vllm/z-lab/Qwen3.5-27B-DFlash","num_speculative_tokens":10}\'',
+        ],
+    },
     "Qwen3-VL-30B-A3B-Instruct-FP8": {
         "hf_model":    "Qwen/Qwen3-VL-30B-A3B-Instruct",
         "description": "Qwen3-VL 30B MoE FP8 — vision-language model",
@@ -1500,6 +1682,44 @@ RECIPES = {
             "--limit-mm-per-prompt '{\"image\": 2, \"audio\": 2}'",
             "--enable-auto-tool-choice",
             "--tool-call-parser qwen3_coder",
+        ],
+    },
+    "Qwen3.6-35B-A3B-PrismaQuant-4.75bit": {
+        "hf_model":    "rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm",
+        "description": "Qwen3.6 35B PrismaQuant 4.75bpp — single-Spark coding/reasoning recipe",
+        "container":   "vllm-node-tf5",
+        "tp": 1, "gpu_mem": 0.6, "max_len": 262144,
+        "cluster_only": false,
+        "solo_only": true,
+        "defaults_extra": {
+            "max_num_seqs": 4,
+            "max_num_batched_tokens": 32768,
+        },
+        "env": {
+            "TRANSFORMERS_OFFLINE": "1",
+            "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+            "VLLM_TUNED_CONFIG_FOLDER": "/workspace/moe-configs",
+            "VLLM_HTTP_TIMEOUT_KEEP_ALIVE": "600",
+            "HF_HUB_OFFLINE": "1",
+            "FLASHINFER_DISABLE_VERSION_CHECK": "1",
+        },
+        "extras": [
+            "--dtype auto",
+            "--load-format instanttensor",
+            "--attention-backend flashinfer",
+            "--enable-prefix-caching",
+            "--enable-chunked-prefill",
+            "--trust-remote-code",
+            "--quantization compressed-tensors",
+            "--kv-cache-dtype fp8",
+            "--reasoning-parser qwen3",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser qwen3_coder",
+            "--optimization-level 3",
+            "--performance-mode throughput",
+            "--default-chat-template-kwargs '{\"preserve_thinking\":true}'",
+            "--speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":3}'",
+            "--override-generation-config '{\"temperature\":0.6,\"top_p\":0.95,\"top_k\":20,\"min_p\":0.0,\"presence_penalty\":1.1,\"repetition_penalty\":1.01}'",
         ],
     },
     "Qwen3-Coder-Next-FP8-Dynamic": {
@@ -1554,25 +1774,6 @@ RECIPES = {
             "--tool-call-parser qwen3_coder",
             "--reasoning-parser nemotron_v3",
             "--enable-auto-tool-choice",
-        ],
-    },
-    "Nemotron-3-Nano-30B-A3B-NVFP4": {
-        "hf_model":    "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4",
-        "description": "Nemotron-3-Nano 30B NVFP4 — Blackwell-native MoE with nano_v3 reasoning",
-        "container":   "vllm-node:latest",
-        "tp": 1, "gpu_mem": 0.65, "max_len": 131072,
-        "env": {
-            "VLLM_USE_FLASHINFER_MOE_FP4": "1",
-            "VLLM_FLASHINFER_MOE_BACKEND": "throughput",
-        },
-        "extras": [
-            "--kv-cache-dtype fp8",
-            "--enforce-eager",
-            "--trust-remote-code",
-            "--quantization modelopt_fp4",
-            "--enable-auto-tool-choice",
-            "--tool-call-parser qwen3_coder",
-            "--reasoning-parser nano_v3",
         ],
     },
     "Nemotron-3-Super-120B-A12B-NVFP4": {
@@ -1680,11 +1881,18 @@ else:
         + "\n"
     )
 
+cluster_only = "true" if r.get("cluster_only", False) else "false"
+solo_only = "true" if r.get("solo_only", False) else "false"
+defaults_extra = r.get("defaults_extra", {})
+defaults_extra_lines = ""
+for key, value in defaults_extra.items():
+    defaults_extra_lines += f"  {key}: {value}\n"
+
 yaml = f"""recipe_version: '1'
 name: {model_name}
 description: {r['description']}
 model: {hf_model}
-cluster_only: false
+cluster_only: {cluster_only}
 container: {r['container']}
 defaults:
   port: 8000
@@ -1692,9 +1900,9 @@ defaults:
   tensor_parallel: {r['tp']}
   gpu_memory_utilization: {r['gpu_mem']}
   max_model_len: {r['max_len']}
-{env_block}command: |
+{defaults_extra_lines}{env_block}command: |
   {cmd.rstrip()}
-solo_only: false
+solo_only: {solo_only}
 """
 
 with open(out_path, "w") as f:
@@ -1920,6 +2128,10 @@ fi
 MODELS=$(curl -sf "$LLAMA_SWAP_URL/v1/models" | jq -r '.data[].id' | sort)
 MODEL_COUNT=$(echo "$MODELS" | wc -l)
 
+if [[ "$SORT_MODE" == "size" ]]; then
+    MODELS=$(printf '%s\n' "$MODELS" | sort_models_by_size)
+fi
+
 # Apply filters
 if [[ ${#FILTERS[@]} -gt 0 ]]; then
     log "Filtering models matching: ${FILTERS[*]}"
@@ -1932,6 +2144,9 @@ if [[ ${#FILTERS[@]} -gt 0 ]]; then
         done
     done
     MODELS=$(echo -e "$FILTERED" | grep -v '^$' | sort -u)
+    if [[ "$SORT_MODE" == "size" ]]; then
+        MODELS=$(printf '%s\n' "$MODELS" | sort_models_by_size)
+    fi
     MODEL_COUNT=$(echo "$MODELS" | wc -l)
 fi
 
@@ -1945,6 +2160,7 @@ TOTAL_START=$(date +%s.%N)
 
 # Collect results for final summary
 declare -A SUMMARY_PP SUMMARY_TG SUMMARY_PEAK SUMMARY_TTFT SUMMARY_STATUS SUMMARY_DEGRADATION SUMMARY_QUALITY SUMMARY_LOAD
+declare -A SUMMARY_RAM
 declare -A SUMMARY_QUALITY_DEPLOY SUMMARY_QUALITY_RESPONSE SUMMARY_QUALITY_CTXPRESS SUMMARY_QUALITY_POINTS SUMMARY_QUALITY_CATS SUMMARY_QUALITY_REPORT SUMMARY_QUALITY_RATING
 
 for MODEL in $MODELS; do
@@ -1969,6 +2185,7 @@ for MODEL in $MODELS; do
 
     # Write checkpoint BEFORE starting so a crash is detectable
     checkpoint_model_start "$MODEL"
+    SUMMARY_RAM[$MODEL]=$(get_model_ram_budget "$MODEL")
 
     # Unload previous model to get a clean measurement
     unload_all
@@ -2107,13 +2324,13 @@ log "  Checkpoint : $CHECKPOINT_FILE"
 log ""
 # Wider table when quality column is shown
 if [[ "$QUALITY" == true ]]; then
-    log "  ${BOLD}$(printf '%-42s  %8s  %14s  %12s  %8s  %14s  %9s' 'Model' 'Load' 'Read (pp)' 'Write (tg)' 'Peak' 'Deep ctx' 'Quality')${NC}"
-    log "  ${DIM}$(printf '%-42s  %8s  %14s  %12s  %8s  %14s  %9s' '' 'sec' 'tok/s' 'tok/s' 'tok/s' 'degradation' '/100')${NC}"
-    log "  $(printf '%.0s-' {1..120})"
+    log "  ${BOLD}$(printf '%-42s  %8s  %10s  %14s  %12s  %8s  %14s  %9s' 'Model' 'Load' 'RAM' 'Read (pp)' 'Write (tg)' 'Peak' 'Deep ctx' 'Quality')${NC}"
+    log "  ${DIM}$(printf '%-42s  %8s  %10s  %14s  %12s  %8s  %14s  %9s' '' 'sec' 'budget' 'tok/s' 'tok/s' 'tok/s' 'degradation' '/100')${NC}"
+    log "  $(printf '%.0s-' {1..132})"
 else
-    log "  ${BOLD}$(printf '%-42s  %8s  %14s  %12s  %8s  %14s' 'Model' 'Load' 'Read (pp)' 'Write (tg)' 'Peak' 'Deep ctx')${NC}"
-    log "  ${DIM}$(printf '%-42s  %8s  %14s  %12s  %8s  %14s' '' 'sec' 'tok/s' 'tok/s' 'tok/s' 'degradation')${NC}"
-    log "  $(printf '%.0s-' {1..106})"
+    log "  ${BOLD}$(printf '%-42s  %8s  %10s  %14s  %12s  %8s  %14s' 'Model' 'Load' 'RAM' 'Read (pp)' 'Write (tg)' 'Peak' 'Deep ctx')${NC}"
+    log "  ${DIM}$(printf '%-42s  %8s  %10s  %14s  %12s  %8s  %14s' '' 'sec' 'budget' 'tok/s' 'tok/s' 'tok/s' 'degradation')${NC}"
+    log "  $(printf '%.0s-' {1..118})"
 fi
 
 for MODEL in $MODELS; do
@@ -2126,27 +2343,28 @@ for MODEL in $MODELS; do
     peak="${SUMMARY_PEAK[$MODEL]:-—}"
     ttft="${SUMMARY_TTFT[$MODEL]:-—}"
     degrad="${SUMMARY_DEGRADATION[$MODEL]:-—}"
+    ram="${SUMMARY_RAM[$MODEL]:-—}"
     quality="${SUMMARY_QUALITY[$MODEL]:-—}"
 
     if [[ "$status" == "OK" ]]; then
         if [[ "$QUALITY" == true ]]; then
-            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s  %9s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "$pp" "$tg" "$peak" "$degrad" "$quality"
+            printf -v line "  %-42s  %8s  %10s  %14s  %12s  %8s  %14s  %9s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "$ram" "$pp" "$tg" "$peak" "$degrad" "$quality"
         else
-            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "$pp" "$tg" "$peak" "$degrad"
+            printf -v line "  %-42s  %8s  %10s  %14s  %12s  %8s  %14s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "$ram" "$pp" "$tg" "$peak" "$degrad"
         fi
         log "${GREEN}${line}${NC}"
     elif [[ "$status" == "INCOHERENT" ]]; then
         if [[ "$QUALITY" == true ]]; then
-            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s  %9s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "INCOHERENT" "—" "—" "—" "—"
+            printf -v line "  %-42s  %8s  %10s  %14s  %12s  %8s  %14s  %9s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "$ram" "INCOHERENT" "—" "—" "—" "—"
         else
-            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "INCOHERENT" "—" "—" "—"
+            printf -v line "  %-42s  %8s  %10s  %14s  %12s  %8s  %14s" "$local_name" "${SUMMARY_LOAD[$MODEL]:-—}" "$ram" "INCOHERENT" "—" "—" "—"
         fi
         log "${YELLOW}${line}${NC}"
     else
         if [[ "$QUALITY" == true ]]; then
-            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s  %9s" "$local_name" "—" "FAIL" "—" "—" "—" "—"
+            printf -v line "  %-42s  %8s  %10s  %14s  %12s  %8s  %14s  %9s" "$local_name" "—" "$ram" "FAIL" "—" "—" "—" "—"
         else
-            printf -v line "  %-42s  %8s  %14s  %12s  %8s  %14s" "$local_name" "—" "FAIL" "—" "—" "—"
+            printf -v line "  %-42s  %8s  %10s  %14s  %12s  %8s  %14s" "$local_name" "—" "$ram" "FAIL" "—" "—" "—"
         fi
         log "${RED}${line}${NC}"
     fi

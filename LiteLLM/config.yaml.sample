@@ -284,16 +284,6 @@ model_list:
       drop_params: true
 
   # --- NVIDIA Nemotron (Hybrid Reasoning Trace) ---
-  - model_name: Nemotron-3-Nano-30B-A3B-NVFP4
-    litellm_params:
-      model: openai/Nemotron-3-Nano-30B-A3B-NVFP4
-      api_base: "http://llama-swap:8080/v1"
-      api_key: "sk-your-litellm-master-key"
-      include_reasoning: true
-      supports_reasoning: true
-      # FIXED: This merges the <think> blocks so the UI doesn't break
-      merge_reasoning_content_in_choices: true
-
   # --- NVIDIA Nemotron-3 Nano-Omni (Multimodal: text + image + audio, FP8) ---
   # - model_name: Nemotron-3-Nano-Omni-30B-A3B-Reasoning-FP8
   #   litellm_params:

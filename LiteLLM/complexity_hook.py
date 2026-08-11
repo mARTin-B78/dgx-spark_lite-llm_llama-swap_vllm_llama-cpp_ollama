@@ -32,8 +32,8 @@ ROUTER_CONFIG = {
     "tiers": {
         "SIMPLE": "Qwen3.5-4B-Q4_K_M",
         "MEDIUM": "Qwen3.5-4B-Q4_K_M",
-        "COMPLEX": "Qwen3.5-4B-Q4_K_M",
-        "REASONING": "Qwen3.5-4B-Q4_K_M",
+        "COMPLEX": "Qwen3.6-27B-Uncensored-Q4_K",
+        "REASONING": "Qwen3.6-27B-Uncensored-Q4_K",
     },
     "tier_boundaries": {
         "simple_medium": 0.18,
@@ -47,6 +47,8 @@ DEFAULT_MODEL = "Qwen3.5-4B-Q4_K_M"
 # Models that should be complexity-routed. OpenClaw points its agent at
 # "auto_router1"; "auto" is accepted as an alias too.
 TRIGGER_MODELS = {"auto_router1", "auto"}
+TEMPERATURE_MIN = 0.0
+TEMPERATURE_MAX = 2.0
 
 _classifier: Optional[Any] = None
 if _HAVE_CLASSIFIER:
@@ -121,6 +123,23 @@ def _extract_prompt(data: dict) -> Tuple[str, str]:
     return user_text, system_text
 
 
+def _clamp_temperature(data: dict) -> None:
+    """Keep client-supplied temperature inside OpenAI-compatible bounds."""
+    raw_temp = data.get("temperature")
+    if raw_temp is None:
+        return
+
+    try:
+        temp = float(raw_temp)
+    except (TypeError, ValueError):
+        return
+
+    if temp < TEMPERATURE_MIN:
+        data["temperature"] = TEMPERATURE_MIN
+    elif temp > TEMPERATURE_MAX:
+        data["temperature"] = TEMPERATURE_MAX
+
+
 class ComplexityResponsesRouter(CustomLogger):
     async def async_pre_call_hook(
         self, user_api_key_dict, cache, data: dict, call_type
@@ -128,6 +147,7 @@ class ComplexityResponsesRouter(CustomLogger):
         try:
             if not isinstance(data, dict):
                 return data
+            _clamp_temperature(data)
             if data.get("model") not in TRIGGER_MODELS:
                 return data
 

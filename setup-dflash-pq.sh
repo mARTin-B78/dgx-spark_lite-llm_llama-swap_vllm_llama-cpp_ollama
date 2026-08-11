@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Setting up AEON-7 DFlash and PrismaQuant models..."
+echo "Setting up PrismaQuant models..."
 
 # 1. Pull the DFlash Docker Image
 echo "Pulling DFlash container..."
@@ -20,7 +20,7 @@ hf download AEON-7/DFlash-Qwen3.5-27B-Uncensored-NVFP4 --local-dir "$LLM_ROOT/vl
 echo "Downloading DFlash Drafter z-lab/Qwen3.5-27B-DFlash..."
 hf download z-lab/Qwen3.5-27B-DFlash --local-dir "$LLM_ROOT/vllm/z-lab/Qwen3.5-27B-DFlash" || true
 
-echo "Downloading rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm..."
-hf download rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm --local-dir "$LLM_ROOT/vllm/rdtand/Qwen3.6-27B-PrismaQuant-5.5bit-vllm" || true
+echo "Downloading rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm..."
+hf download rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm --local-dir "$LLM_ROOT/vllm/rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm" || true
 
 echo "Models downloaded successfully."

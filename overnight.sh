@@ -1,35 +1,54 @@
 #!/bin/bash
+set -euo pipefail
+
 cd /home/sparky/Docker/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama
 
-MODELS="
-DeepSeek-V4-Flash-IQ2XXS-DS4
-GPT-OSS-120B
-Nemotron-3-Nano-4B-FP8
-Nemotron-3-Nano-30B-A3B-NVFP4
-Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
-Nemotron-3-Super-120B-A12B-NVFP4
-Qwen3-Coder-Next-FP8-Dynamic
-Qwen3-Coder-Next-int4-AutoRound
-Qwen3-Omni-30B-A3B-Instruct
-Qwen3-VL-30B-A3B-Instruct-FP8
-Qwen3.5-4B-Q4_K_M
-Qwen3.5-27B-Uncensored-DFlash-NVFP4
-Qwen3.5-35B-A3B-FP8
-Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M
-Qwen3.5-122B-A10B-int4-AutoRound
-Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP
-Qwen3.6-27B-PrismaQuant-5.5bit
-Qwen3.6-27B-PrismaSCOUT-NVFP4
-Qwen3.6-27B-uncensored-heretic-vllm
-Qwen3.6-35B-A3B-FP8
-"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+LOG_DIR="$PWD/test-results/overnight-logs"
+mkdir -p "$LOG_DIR"
+MASTER_LOG="$LOG_DIR/overnight_${TIMESTAMP}.log"
 
-# Run the full benchmark suite which covers load times, memory impact, 
-# generation speed, context lengths, and runs the full 69-scenario quality 
-# evaluation covering coding, agentic tool use, and creative writing.
-for model in $MODELS; do
-    echo "=================================================="
-    echo "Benchmarking $model..."
-    echo "=================================================="
-    ./benchmark-models.sh --quality --quality-mode full "$model"
+MODELS=(
+    "Qwen3.6-27B-AEON-Ultimate-Uncensored-NVFP4"
+    "Qwen3.5-122B-A10B-heretic-v2-NVFP4"
+    "Qwen3.5-122B-A10B-NVFP4"
+)
+
+log() {
+    printf '%s\n' "$*" | tee -a "$MASTER_LOG"
+}
+
+on_exit() {
+    local status=$?
+    log "Sequence finished with exit code $status at $(date '+%Y-%m-%d %H:%M:%S')"
+}
+trap on_exit EXIT
+
+log "Starting ordered benchmark sequence"
+log "Master log: $MASTER_LOG"
+log "Model order:"
+for model in "${MODELS[@]}"; do
+    log "  - $model"
+done
+log ""
+
+# Run the models one at a time so each start/load/benchmark is easy to inspect.
+# benchmark-models.sh already writes detailed report/checkpoint files; the outer
+# log here preserves the sequence and the model-by-model console output.
+for model in "${MODELS[@]}"; do
+    safe_name="${model//\//_}"
+    model_log="$LOG_DIR/${safe_name}_${TIMESTAMP}.log"
+
+    log "=================================================="
+    log "Benchmarking $model"
+    log "Model log: $model_log"
+    log "=================================================="
+
+    if ./benchmark-models.sh --quality --quality-mode full "$model" 2>&1 | tee -a "$model_log"; then
+        log "Completed $model successfully"
+    else
+        status=$?
+        log "FAILED $model with exit code $status"
+    fi
+    log ""
 done
