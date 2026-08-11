@@ -14,9 +14,8 @@ models = [
 "Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M",
 "Qwen3.5-122B-A10B-int4-AutoRound",
 "Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP",
-"Qwen3.6-27B-PrismaQuant-5.5bit",
+"Qwen3.6-35B-A3B-PrismaQuant-4.75bit",
 "Qwen3.6-27B-PrismaSCOUT-NVFP4",
-"Qwen3.6-27B-uncensored-heretic-vllm",
 "Qwen3.6-35B-A3B-FP8"
 ]
 

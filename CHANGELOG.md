@@ -11,6 +11,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.11.0] — 2026-08-11
+
+### Added
+- **`llama-qwen36-27b`**: second always-on persistent llama.cpp service (Qwen3.6-27B
+  abliterated, Q4_K_M, ~16.5 GB) alongside the existing always-on 4B, exposed on
+  `19002`. Stays resident regardless of what llama-swap loads/evicts.
+- **`LiteLLM/complexity_hook.py`**: `COMPLEX`/`REASONING` tiers now route to the new
+  always-on 27B instead of falling back to the 4B — the complexity router has real
+  tiering again instead of collapsing everything onto one model. Also clamps
+  client-supplied `temperature` into the `[0, 2]` OpenAI-compatible range instead of
+  passing invalid values through.
+- New `llama-swap` model entries: `Qwen3.6-35B-A3B-int4-AutoRound`,
+  `Qwen3.6-35B-A3B-PrismaQuant-4.75bit`, `Qwen3.5-122B-A10B-NVFP4` (txn545 single-Spark
+  MTP checkpoint, plus `llama-swap/scripts/patch-qwen35-nvfp4-runtime.sh` to register
+  its custom model class before vLLM starts), and the AEON-7 DFlash/Multimodal-NVFP4-MTP
+  variants (`Qwen3.6-27B-AEON-Ultimate-Uncensored-DFlash` /
+  `-Multimodal-NVFP4-MTP`), all mirroring forum-recommended single-Spark recipes.
+- **`sglang`** service in `docker-compose.yml` (scitrera DGX Spark image) as an
+  additional serving backend alongside vLLM/llama.cpp/Ollama.
+- **`LLM_OLLAMA_ROOT_PATH`**: optional dedicated host path for the Ollama model cache,
+  independent of `LLM_ROOT_PATH`; defaults to `${LLM_ROOT_PATH}/ollama` if unset.
+- **`benchmark-models.sh --size-order`**: sort matched models smallest-to-largest
+  before running, plus a per-model RAM-budget lookup so overnight runs are easier to
+  compare at a glance.
+- `docker-compose.yml`/`.sample`: `logging.max-size`/`max-file` on the `llama-swap`
+  service — the default json-file driver never rotated, and one oversized logged
+  response (seen: a 7.5 MB `/api/events` entry) could corrupt the file for `docker
+  logs`' full-history reader while `docker logs -f` kept working, making the log look
+  silently "frozen".
+
+### Changed
+- **`overnight.sh`**: rewritten to run under `set -euo pipefail`, log each model's
+  benchmark output to its own timestamped file under `test-results/overnight-logs/`
+  in addition to a master log, and continue past a failed model instead of aborting
+  the whole sequence.
+- Default `ollama` service in `docker-compose.yml` commented out (superseded by the
+  dedicated always-on llama.cpp services); `IMAGE_NAMESPACE` no longer silently falls
+  back to `${GH_USER}` in image references, so a missing `IMAGE_NAMESPACE` now fails
+  loudly instead of resolving to an unintended tag.
+- `scripts/start-ds4-deepseek.sh`: DSpark speculative decoding now opt-in
+  (`ENABLE_DSPARK=0` by default) — measured peak usage with DSpark enabled
+  (~104–113 GiB against the ~121.69 GiB unified pool) reliably triggered real
+  `NVRM: Out of memory` driver errors that could destabilize the whole graphical
+  session, not just the process; without DSpark the model fits comfortably
+  (~83–90 GiB). Also adds `--gpu-vram`/`--batched-session` args.
+
+### Removed
+- `Qwen3.6-27B-PrismaQuant-5.5bit` / `Qwen3.6-27B-uncensored-heretic-vllm` dropped
+  from `parse_metrics.py` and `overnight.sh` in favor of
+  `Qwen3.6-35B-A3B-PrismaQuant-4.75bit`.
+- `Nemotron-3-Nano-30B-A3B-NVFP4` commented out of `llama-swap/config.yaml.sample`.
+
+---
+
 ## [0.10.5] — 2026-08-04
 
 ### Added
@@ -281,7 +335,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 <!-- version diff links — update tags in GitHub after each release -->
-[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.9.0...v0.10.0

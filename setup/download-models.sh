@@ -141,6 +141,9 @@ if [ "$INSTALL_M_TIER" = "true" ]; then
     MODELS=(
         "microsoft/Phi-4"
         "meta-llama/Llama-3.1-34B-Instruct"
+        # Intel pulled the original repo; this is the current replacement.
+        "Intel/Qwen3.6-35B-A3B-int4-mixed-AutoRound|$LLM_ROOT_PATH/vllm/Intel/Qwen3.6-35B-A3B-int4-AutoRound"
+        "rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm"
     )
     
     for model in "${MODELS[@]}"; do
@@ -168,14 +171,19 @@ if [ "$INSTALL_L_TIER" = "true" ]; then
     
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         MODELS=(
-            "meta-llama/Llama-3.3-70B-Instruct"
-            "meta-llama/Llama-3.1-405B-Instruct"
+            "meta-llama/Llama-3.3-70B-Instruct|$LLM_ROOT_PATH/vllm/meta-llama/Llama-3.3-70B-Instruct"
+            "meta-llama/Llama-3.1-405B-Instruct|$LLM_ROOT_PATH/vllm/meta-llama/Llama-3.1-405B-Instruct"
+            "Intel/Qwen3.5-122B-A10B-int4-AutoRound|$LLM_ROOT_PATH/vllm/Alibaba/Qwen3.5-122B-A10B-int4-AutoRound"
+            "sjug/Qwen3.5-122B-A10B-NVFP4-resharded|$LLM_ROOT_PATH/vllm/sjug/Qwen3.5-122B-A10B-NVFP4-resharded"
+            "rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm|$LLM_ROOT_PATH/vllm/rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm"
         )
-        
-        for model in "${MODELS[@]}"; do
+
+        for entry in "${MODELS[@]}"; do
+            model="${entry%%|*}"
+            local_dir="${entry#*|}"
             print_info "Downloading $model..."
             print_warning "This may take 30+ minutes depending on internet speed"
-            if hf download "$model" --repo-type model --local-dir "$LLM_ROOT_PATH/vllm/$model" "${HF_AUTH_ARGS[@]}" 2>&1 | tail -5; then
+            if hf download "$model" --repo-type model --local-dir "$local_dir" "${HF_AUTH_ARGS[@]}" 2>&1 | tail -5; then
                 print_success "Downloaded: $model"
             else
                 print_warning "Failed to download $model (may require approval or API access)"
