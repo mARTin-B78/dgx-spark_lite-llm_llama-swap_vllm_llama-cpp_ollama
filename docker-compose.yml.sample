@@ -29,7 +29,7 @@ version: '3.8'
 #      IMAGE_NAMESPACE      — path under the registry; defaults to ${GH_USER}.
 #                             For GitLab use "<group>/<project>".
 #    All image references below already expand ${REGISTRY} and
-#    ${IMAGE_NAMESPACE}, so just set them in .env and run as usual.
+#    ${IMAGE_NAMESPACE:-${GH_USER}}, so just set them in .env and run as usual.
 # 3. `docker network create dgx_net`  (if you didn't already)
 # 4. `docker compose up -d`
 # ==============================================================================
@@ -44,7 +44,7 @@ services:
   # (service 3) as ephemeral on-demand containers. Keep this block only if
   # you want a *persistent* vLLM sidecar running alongside llama-swap.
   vllm:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE}/vllm-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/vllm-spark:latest
     container_name: vllm
     restart: unless-stopped
     ipc: host
@@ -68,7 +68,7 @@ services:
   # llama-swap can also spin *ephemeral* llama.cpp containers on demand — use
   # this block for a model you always want hot (e.g. a fast chat fallback).
   llama-server:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE}/llama-cpp-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
     container_name: llama.cpp
     restart: unless-stopped
     ipc: host                          # Required for shared memory with GPU driver
@@ -128,7 +128,7 @@ services:
   # (--network container:llama-swap) so they are reachable as localhost:PORT
   # inside llama-swap, even though they run in separate containers.
   llama-swap:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE}/llama-swap-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-swap-spark:latest
     container_name: llama-swap
     restart: unless-stopped
     ports:
@@ -174,7 +174,7 @@ services:
   # The 15-second startup delay gives the GPU driver time to settle
   # before Ollama tries to claim VRAM — avoids init-time OOM on GB10.
   ollama:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE}/ollama-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/ollama-spark:latest
     container_name: ollama
     restart: unless-stopped
     ipc: host
@@ -211,7 +211,7 @@ services:
   # open API access and UI-only authentication. Uncomment LITELLM_MASTER_KEY
   # to require sk-* tokens on every API call.
   litellm:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE}/litellm-spark:latest
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:latest
     container_name: litellm
     restart: unless-stopped
     depends_on: [litellm-db]

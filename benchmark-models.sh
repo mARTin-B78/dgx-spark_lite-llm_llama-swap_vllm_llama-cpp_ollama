@@ -917,25 +917,30 @@ run_benchy() {
     log "  Running llama-benchy (pp=$PP  tg=$TG  depth=$DEPTH  runs=$RUNS${concurrency_display})..."
     log ""
 
-    # Build shared base flags (used by all runs)
-    local base_flags=""
-    base_flags+=" --base-url $LLAMA_SWAP_URL/v1"
-    base_flags+=" --model $model"
-    base_flags+=" --pp $PP"
-    base_flags+=" --tg $TG"
-    base_flags+=" --depth $DEPTH"
-    base_flags+=" --runs $RUNS"
-    base_flags+=" --latency-mode generation"
-    base_flags+=" --no-warmup"
-    base_flags+=" --skip-coherence"
-    [[ -n "$CONCURRENCY" ]] && base_flags+=" --concurrency $CONCURRENCY"
-    [[ "$MODE" == "arena" ]] && base_flags+=" --enable-prefix-caching"
+    # BENCHY_CMD is a fixed constant ("llama-benchy" or "uvx llama-benchy")
+    # set earlier by the script itself, so splitting it on spaces is safe.
+    local -a bench_base_cmd
+    read -ra bench_base_cmd <<< "$BENCHY_CMD"
+
+    # Build shared base args (used by all runs) as an array — avoids eval,
+    # so a model name containing shell metacharacters can't be interpreted.
+    local -a base_args=(
+        --base-url "$LLAMA_SWAP_URL/v1"
+        --model "$model"
+        --pp "$PP"
+        --tg "$TG"
+        --depth "$DEPTH"
+        --runs "$RUNS"
+        --latency-mode generation
+        --no-warmup
+        --skip-coherence
+    )
+    [[ -n "$CONCURRENCY" ]] && base_args+=(--concurrency "$CONCURRENCY")
+    [[ "$MODE" == "arena" ]] && base_args+=(--enable-prefix-caching)
 
     # --- Run 1: Save JSON for data parsing ---
-    local cmd_json="${BENCHY_CMD}${base_flags} --save-result ${json_file} --format json"
-
     local output exit_code=0
-    output=$(eval "$cmd_json" 2>&1) || exit_code=$?
+    output=$("${bench_base_cmd[@]}" "${base_args[@]}" --save-result "$json_file" --format json 2>&1) || exit_code=$?
 
     if [[ $exit_code -ne 0 ]]; then
         log "  ${RED}llama-benchy failed:${NC}"
@@ -948,10 +953,9 @@ run_benchy() {
         local arena_model_dir="$ARENA_DIR/${safe_name}"
         mkdir -p "$arena_model_dir"
         local csv_file="$arena_model_dir/results.csv"
-        local cmd_csv="${BENCHY_CMD}${base_flags} --save-result ${csv_file} --format csv"
         log "  ${CYAN}Saving arena submission CSV...${NC}"
         local csv_output csv_exit=0
-        csv_output=$(eval "$cmd_csv" 2>&1) || csv_exit=$?
+        csv_output=$("${bench_base_cmd[@]}" "${base_args[@]}" --save-result "$csv_file" --format csv 2>&1) || csv_exit=$?
         if [[ $csv_exit -ne 0 ]]; then
             log "  ${YELLOW}Warning: CSV run failed — JSON data still saved${NC}"
         else
@@ -960,10 +964,8 @@ run_benchy() {
     fi
 
     # --- Run 2: Get the markdown table (for sharing on forums) ---
-    local cmd_md="${BENCHY_CMD}${base_flags} --save-result ${md_file} --format md"
-
     local md_output
-    md_output=$(eval "$cmd_md" 2>&1) || true
+    md_output=$("${bench_base_cmd[@]}" "${base_args[@]}" --save-result "$md_file" --format md 2>&1) || true
 
     # Show the full saved markdown file (the format people share on forums)
     if [[ -f "$md_file" ]]; then
@@ -1211,12 +1213,18 @@ run_quality() {
     log ""
     log "  ${CYAN}Running tool-eval-bench (quality)...${NC}"
 
-    local flags=""
-    flags+=" --base-url $LLAMA_SWAP_URL"
-    flags+=" --model $model"
-    flags+=" --backend vllm"
-    flags+=" --no-warmup"
-    flags+=" --no-live"
+    # TOOLEVAL_CMD is a fixed constant ("tool-eval-bench" or "uvx tool-eval-bench")
+    # set earlier by the script itself, so splitting it on spaces is safe.
+    local -a tooleval_base_cmd
+    read -ra tooleval_base_cmd <<< "$TOOLEVAL_CMD"
+
+    local -a args=(
+        --base-url "$LLAMA_SWAP_URL"
+        --model "$model"
+        --backend vllm
+        --no-warmup
+        --no-live
+    )
 
     # Handle context size: explicit flag > auto-detect from recipes
     local ctx_size="$QUALITY_CONTEXT_SIZE"
@@ -1224,27 +1232,34 @@ run_quality() {
         ctx_size=$(get_model_max_len "$model")
         [[ -n "$ctx_size" ]] && log "  ${DIM}Auto-detected context size from recipe: $ctx_size${NC}"
     fi
-    [[ -n "$ctx_size" ]] && flags+=" --context-size $ctx_size"
+    [[ -n "$ctx_size" ]] && args+=(--context-size "$ctx_size")
 
-    [[ -n "$QUALITY_SEED" ]] && flags+=" --seed $QUALITY_SEED"
-    [[ -n "$QUALITY_PRESSURE" ]] && flags+=" --context-pressure $QUALITY_PRESSURE"
-    [[ -n "$QUALITY_PRESSURE_SWEEP" ]] && flags+=" --context-pressure-sweep $QUALITY_PRESSURE_SWEEP"
-    [[ -n "$QUALITY_EXTRA_ARGS" ]] && flags+=" $QUALITY_EXTRA_ARGS"
-    flags+=" --output-dir $QUALITY_DIR"
+    [[ -n "$QUALITY_SEED" ]] && args+=(--seed "$QUALITY_SEED")
+    [[ -n "$QUALITY_PRESSURE" ]] && args+=(--context-pressure "$QUALITY_PRESSURE")
+    [[ -n "$QUALITY_PRESSURE_SWEEP" ]] && args+=(--context-pressure-sweep "$QUALITY_PRESSURE_SWEEP")
+    if [[ -n "$QUALITY_EXTRA_ARGS" ]]; then
+        # Intentionally word-split (not eval'd) so a multi-flag string like
+        # "--foo bar --baz" still works, without giving the shell a chance
+        # to interpret ;, $(), backticks, or pipes in it.
+        local -a extra_args
+        read -ra extra_args <<< "$QUALITY_EXTRA_ARGS"
+        args+=("${extra_args[@]}")
+    fi
+    args+=(--output-dir "$QUALITY_DIR")
 
     case "$QUALITY_MODE" in
-        short)    flags+=" --short" ;;
+        short)    args+=(--short) ;;
         full)     ;;  # default 69 scenarios
-        hardmode) flags+=" --hardmode" ;;
+        hardmode) args+=(--hardmode) ;;
         *)        log "  ${YELLOW}Unknown --quality-mode '$QUALITY_MODE', defaulting to short${NC}"
-                  flags+=" --short" ;;
+                  args+=(--short) ;;
     esac
-    [[ -n "$QUALITY_CATEGORIES" ]] && flags+=" --categories $QUALITY_CATEGORIES"
+    [[ -n "$QUALITY_CATEGORIES" ]] && args+=(--categories "$QUALITY_CATEGORIES")
 
     # Capture stdout + stderr so we can extract the score line.
     local out_file="/tmp/tooleval_${TIMESTAMP}_$$.log"
     local exit_code=0
-    eval "$TOOLEVAL_CMD$flags" >"$out_file" 2>&1 || exit_code=$?
+    "${tooleval_base_cmd[@]}" "${args[@]}" >"$out_file" 2>&1 || exit_code=$?
 
     if [[ $exit_code -ne 0 ]]; then
         log "  ${RED}tool-eval-bench failed (exit $exit_code):${NC}"
