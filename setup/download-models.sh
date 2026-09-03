@@ -8,6 +8,7 @@
 ###############################################################################
 
 set -e
+set -o pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -53,6 +54,10 @@ fi
 # Source the .env file
 source "$REPO_ROOT/.env"
 
+# Xet range requests can return HTTP 416 on interrupted large shards.
+# Prefer the regular Hugging Face HTTP backend; downloads remain resumable.
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
+
 # Verify variables
 if [ -z "$LLM_ROOT_PATH" ]; then
     print_error "LLM_ROOT_PATH not set in .env"
@@ -63,6 +68,8 @@ print_header "DGX Spark LLM Stack - Model Download"
 echo "Loading configuration from: $REPO_ROOT/.env"
 echo "Storage path: $LLM_ROOT_PATH"
 echo ""
+
+QWEN38_ROOT="${QWEN38_ROOT:-$LLM_ROOT_PATH/qwen38}"
 
 # Create model directories
 mkdir -p "$LLM_ROOT_PATH"/{vllm,ollama,gguf}
@@ -117,12 +124,17 @@ if [ "$INSTALL_S_TIER" = "true" ]; then
         "unsloth/Qwen2-7B"
         "unsloth/Qwen3-Coder-Next-FP8-Dynamic"
         "HauhauCS/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive"
+        "RadixArk/Qwen3.8-27B-NVFP4|$QWEN38_ROOT/RadixArk/Qwen3.8-27B-NVFP4"
+        "z-lab/Qwen3.8-27B-DFlash2|$QWEN38_ROOT/z-lab/Qwen3.8-27B-DFlash2"
     )
     
     for model in "${MODELS[@]}"; do
-        print_info "Downloading $model..."
-        if hf download "$model" --repo-type model --local-dir "$LLM_ROOT_PATH/vllm/$model" "${HF_AUTH_ARGS[@]}" 2>&1 | tail -5; then
-            print_success "Downloaded: $model"
+        model_id="${model%%|*}"
+        local_dir="${model#*|}"
+        [[ "$model" != *"|"* ]] && local_dir="$LLM_ROOT_PATH/vllm/$model"
+        print_info "Downloading $model_id..."
+        if hf download "$model_id" --repo-type model --local-dir "$local_dir" "${HF_AUTH_ARGS[@]}" 2>&1 | tail -5; then
+            print_success "Downloaded: $model_id"
         else
             print_warning "Failed to download $model (may already exist)"
         fi
