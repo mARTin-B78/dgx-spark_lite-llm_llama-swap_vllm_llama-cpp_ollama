@@ -85,6 +85,75 @@ macros:
 #      - Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 # solo: gpu_mem 0.80 (102 GB) — NVFP4 Optimized version
 
 models:
+# --- Qwen3.8-Flash-Next NVFP4 + HashK PLE + NEXTN (single DGX Spark) ---
+# This is a solo-only ~180B MoE deployment. The raw checkpoint is ~135 GB;
+# build ple_hashk_R4.pt (~12.8 GB) first using setup/setup-flashnext.sh.
+  Qwen3.8-Flash-Next-NVFP4:
+    ttl: 0
+    readyTimeout: 1800
+    checkEndpoint: "/health"
+    cmd: >
+      docker run --rm --name sglang-flashnext-${PORT}
+      --device nvidia.com/gpu=all --network container:llama-swap --ipc host --shm-size 32g
+      --ulimit memlock=-1 --ulimit stack=67108864
+      --security-opt seccomp=unconfined
+      -v <QWEN38_FLASHNEXT_HF_CACHE>:/root/.cache/huggingface
+      -v <FLASHNEXT_REPO>:/patches:ro
+      -e SGLANG_QWEN4_PLE_HASHK=/patches/ple_hashk_R4.pt
+      -v <FLASHNEXT_REPO>/patches/qwen4_exp_nvfp4.py:/sgl-workspace/sglang/python/sglang/srt/models/qwen4_exp.py:ro
+      -v <FLASHNEXT_REPO>/patches/flash_fwd.py:/usr/local/lib/python3.12/dist-packages/flash_attn/cute/flash_fwd.py:ro
+      -v <FLASHNEXT_REPO>/patches/qwen_sparse_attn_backend.py:/sgl-workspace/sglang/python/sglang/srt/layers/attention/qwen_sparse_attn_backend.py:ro
+      -v <FLASHNEXT_REPO>/patches/sparse_attn.py:/sgl-workspace/sglang/python/sglang/srt/layers/attention/qsa/sparse_attn.py:ro
+      lmsysorg/sglang:qwen38flashnext
+      python3 -m sglang.launch_server
+      --model-path RadixArk/Qwen3.8-Flash-Next-NVFP4
+      --served-model-name flash-next --trust-remote-code --language-only
+      --quantization modelopt_fp4 --fp4-gemm-backend flashinfer_cutlass
+      --kv-cache-dtype fp8_e4m3 --page-size 64
+      --mamba-scheduler-strategy extra_buffer --mamba-track-interval 64
+      --chunked-prefill-size 8192 --max-prefill-tokens 32768
+      --max-running-requests 8 --max-mamba-cache-size 24 --mamba-ssm-dtype bfloat16
+      --context-length 262144 --mem-fraction-static 0.95
+      --default-chat-template-kwargs '{"enable_thinking": true, "reasoning_effort": "medium"}'
+      --reasoning-parser qwen3 --tool-call-parser qwen3_coder --strip-thinking-cache
+      --speculative-algorithm NEXTN --speculative-num-steps 3
+      --speculative-eagle-topk 1 --speculative-num-draft-tokens 4
+      --host ${host} --port ${PORT}
+    cmdStop: "docker stop sglang-flashnext-${PORT}"
+
+# --- Qwen3.8-27B NVFP4 + DFlash2 (DGX Spark / SGLang) ---
+# Target: RadixArk/Qwen3.8-27B-NVFP4
+# Draft:  z-lab/Qwen3.8-27B-DFlash2 (block size 8)
+# The dedicated SGLang image contains the GB10-compatible DFlash2 selector
+# needed by the quantized lm_head. Download both repositories before use.
+  Qwen3.8-27B-NVFP4-DFlash2:
+    ttl: 0
+    readyTimeout: 1200
+    checkEndpoint: "/health"
+    cmd: >
+      docker run --rm --name sglang-qwen38-dflash2-${PORT}
+      --device nvidia.com/gpu=all --ipc host --network container:llama-swap
+      --ulimit memlock=-1 --ulimit stack=67108864
+      --security-opt seccomp=unconfined
+      -v <LLM_ROOT_PATH>/qwen38/RadixArk/Qwen3.8-27B-NVFP4:/models/qwen38:ro
+      -v <LLM_ROOT_PATH>/qwen38/z-lab/Qwen3.8-27B-DFlash2:/models/dflash2:ro
+      lmsysorg/sglang:dev-qwen38-27b-dflash2
+      python3 -m sglang.launch_server
+      --model-path /models/qwen38 --served-model-name qwen38-27b
+      --host ${host} --port ${PORT}
+      --attention-backend flashinfer --kv-cache-dtype fp8_e4m3
+      --mem-fraction-static 0.50 --chunked-prefill-size 2048
+      --context-length 262144 --allow-auto-truncate
+      --mamba-ssm-dtype float32 --mamba-radix-cache-strategy extra_buffer_lazy
+      --max-running-requests 1 --max-mamba-cache-size 8
+      --speculative-algorithm DFLASH
+      --speculative-draft-model-path /models/dflash2
+      --speculative-num-draft-tokens 8
+      --reasoning-parser qwen3 --tool-call-parser qwen3_coder
+      --stream-interval 1 --sleep-on-idle
+      --trust-remote-code
+    cmdStop: "docker stop sglang-qwen38-dflash2-${PORT}"
+
 # ==============================================================================
 # IMAGE NAMES — TWO SEPARATE IMAGE FAMILIES
 # ==============================================================================

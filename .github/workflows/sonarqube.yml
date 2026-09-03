@@ -1,0 +1,69 @@
+name: Test and SonarQube
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Create the SonarQube project with this exact key.
+  SONAR_PROJECT_KEY: mARTin-B78_dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Python files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t python_files < <(find . -type f -name '*.py' \
+            -not -path './.git/*' \
+            -not -path '*/__pycache__/*' \
+            -not -path './vllm/build/*')
+          if ((${#python_files[@]})); then
+            python3 -m py_compile "${python_files[@]}"
+          fi
+
+      - name: Validate shell scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+          done < <(find . -type f \( -name '*.sh' -o -name '*.bash' \) \
+            -not -path './.git/*' -print0)
+
+      - name: Validate Docker Compose configuration
+        env:
+          GH_USER: ci
+          LLM_ROOT_PATH: /tmp/llms
+          REPO_CONFIG_PATH: ${{ github.workspace }}
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/litellm
+          POSTGRES_DB: litellm
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          LITELLM_UI_USERNAME: ci
+          LITELLM_UI_PASSWORD: ci
+        run: docker compose config --quiet
+
+      - name: SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v8.1.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+        with:
+          args: >-
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.sources=.
+            -Dsonar.exclusions=**/.git/**,**/__pycache__/**,**/build/**,**/logs/**,**/*.sqlite,**/*.pyc
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
