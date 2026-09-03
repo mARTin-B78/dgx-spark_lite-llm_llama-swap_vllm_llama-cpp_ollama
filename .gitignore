@@ -9,6 +9,8 @@ llama-swap/config.yaml
 openclaw/
 
 # --- Build Artifacts & Output ---
+__pycache__/
+*.pyc
 vllm/build/
 test-results/
 FORUM_UPDATE.md
