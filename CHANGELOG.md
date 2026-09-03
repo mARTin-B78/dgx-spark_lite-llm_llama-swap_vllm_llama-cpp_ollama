@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.12.0] — 2026-09-03
+
+### Added
+- **Qwen3.8-27B-NVFP4-DFlash2**: llama-swap/SGLang recipe with DFlash2 speculative decoding.
+- **Qwen3.8-Flash-Next-NVFP4**: llama-swap/SGLang recipe with HashK PLE and NEXTN speculative decoding.
+- **`setup/setup-flashnext.sh`**: prepare the Flash-Next checkpoint and HashK PLE artifact.
+- **`setup/download-models.sh`**: download the Qwen3.8 checkpoints into a dedicated `QWEN38_ROOT` path and disable Xet by default for resumable HTTP downloads.
+- **LiteLLM**: expose the new Qwen3.8 models through the unified gateway.
+- **GitHub Actions**: validate Python, shell, Docker Compose, and SonarQube quality on pushes to `main`.
+
+---
+
 ## [0.11.1] — 2026-08-11
 
 ### Fixed
@@ -349,7 +361,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 <!-- version diff links — update tags in GitHub after each release -->
-[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.1...v0.10.2
