@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.12.1] — 2026-09-07
+
 ### Fixed
 - **Qwen3.8-27B-NVFP4-DFlash2**: prompts of roughly 24k tokens or more failed with
   HTTP 500 (`Out of memory even after retracting all other requests in the decode
