@@ -41,3 +41,7 @@ setup/SETUP_SUMMARY.txt
 $'\001'*
 STACK_ERKLÄRUNG.md
 SONARQUBE-LLM-GUIDE.md
+
+# --- Personal Notes (local only) ---
+todo.md
+TODO.md
