@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Sample configs**: `LiteLLM/config.yaml.sample` and `llama-swap/config.yaml.sample`
+  are regenerated from the live configs, so they now document all 31 LiteLLM models
+  and all 25 llama-swap models instead of the stale 21/22. Secrets and private data
+  are replaced with placeholders: `<LLM_ROOT_PATH>`, `<REPO_CONFIG_PATH>`,
+  `<FLASHNEXT_REPO>`, `<HOME>`, `<IMAGE_NAMESPACE>` and a new `<LAN_HOST_IP>`.
+  The samples now differ from the live files only by those redactions plus the
+  sample-only `disable_master_key_return: true` hardening flag.
+
+### Fixed
+- **Sample configs**: the committed `LiteLLM/config.yaml.sample` previously contained
+  a real LAN IP address; it is now `<LAN_HOST_IP>`.
+- **llama-swap**: the DFlash2 KV pool sizing notes now live in the real config too,
+  so they survive future sample regeneration.
+
 ---
 
 ## [0.12.1] — 2026-09-07
