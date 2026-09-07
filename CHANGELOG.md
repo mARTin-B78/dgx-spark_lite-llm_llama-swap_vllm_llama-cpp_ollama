@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Qwen3.8-27B-NVFP4-DFlash2**: prompts of roughly 24k tokens or more failed with
+  HTTP 500 (`Out of memory even after retracting all other requests in the decode
+  batch`). SGLang sized its KV pool at only 23,879 tokens, so `--allow-auto-truncate`
+  cut the prompt to exactly the pool size and left zero slots for decoding; with
+  `--max-running-requests 1` there was nothing to retract and the request aborted.
+  The recipe now sets `--max-total-tokens 131072` and raises `--mem-fraction-static`
+  from 0.53 to 0.58, giving a 131,072-token pool (5.5x larger) for 5.26 GB of KV
+  cache, with ~57 GB of device memory still free.
+- **LiteLLM**: the `Qwen3.8-27B-NVFP4-DFlash2` entry advertised
+  `max_input_tokens: 262144`, far beyond what the server could hold, so oversized
+  prompts failed mid-stream instead of being rejected. Input and output limits now
+  sum to the real pool size (98,304 + 32,768 = 131,072).
+- **LiteLLM (sample config)**: `model_info` for the same model was nested under
+  `litellm_params`, where LiteLLM ignores it. It is now a sibling key.
+
 ---
 
 ## [0.12.0] — 2026-09-03

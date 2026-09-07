@@ -107,7 +107,7 @@ models:
       lmsysorg/sglang:qwen38flashnext
       python3 -m sglang.launch_server
       --model-path RadixArk/Qwen3.8-Flash-Next-NVFP4
-      --served-model-name flash-next --trust-remote-code --language-only
+      --served-model-name Qwen3.8-Flash-Next-NVFP4 --trust-remote-code --language-only
       --quantization modelopt_fp4 --fp4-gemm-backend flashinfer_cutlass
       --kv-cache-dtype fp8_e4m3 --page-size 64
       --mamba-scheduler-strategy extra_buffer --mamba-track-interval 64
@@ -126,6 +126,16 @@ models:
 # Draft:  z-lab/Qwen3.8-27B-DFlash2 (block size 8)
 # The dedicated SGLang image contains the GB10-compatible DFlash2 selector
 # needed by the quantized lm_head. Download both repositories before use.
+#
+# KV pool sizing (GB10 unified memory):
+#   --max-total-tokens fixes the pool at 131072 tokens (~5.26 GB of FP8 KV).
+#   --mem-fraction-static must be high enough to fit weights + draft + mamba +
+#   CUDA graphs + that pool, or SGLang refuses to start with
+#   "Loaded weights leave no GPU memory for the KV cache".
+#   Without --max-total-tokens the pool defaults to ~23.9k tokens, and because
+#   --allow-auto-truncate trims a prompt to exactly the pool size, any long
+#   prompt fills the pool and aborts on the first decode step.
+#   Keep LiteLLM's max_input_tokens + max_output_tokens <= --max-total-tokens.
   Qwen3.8-27B-NVFP4-DFlash2:
     ttl: 0
     readyTimeout: 1200
@@ -139,11 +149,12 @@ models:
       -v <LLM_ROOT_PATH>/qwen38/z-lab/Qwen3.8-27B-DFlash2:/models/dflash2:ro
       lmsysorg/sglang:dev-qwen38-27b-dflash2
       python3 -m sglang.launch_server
-      --model-path /models/qwen38 --served-model-name qwen38-27b
+      --model-path /models/qwen38 --served-model-name Qwen3.8-27B-NVFP4-DFlash2
       --host ${host} --port ${PORT}
       --attention-backend flashinfer --kv-cache-dtype fp8_e4m3
-      --mem-fraction-static 0.50 --chunked-prefill-size 2048
+      --mem-fraction-static 0.58 --chunked-prefill-size 2048
       --context-length 262144 --allow-auto-truncate
+      --max-total-tokens 131072
       --mamba-ssm-dtype float32 --mamba-radix-cache-strategy extra_buffer_lazy
       --max-running-requests 1 --max-mamba-cache-size 8
       --speculative-algorithm DFLASH
