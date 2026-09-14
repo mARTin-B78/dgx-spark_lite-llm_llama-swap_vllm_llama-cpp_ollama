@@ -317,7 +317,9 @@ services:
   # open API access and UI-only authentication. Uncomment LITELLM_MASTER_KEY
   # to require sk-* tokens on every API call.
   litellm:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:latest
+    # Pin this deployment through ignored .env while the Headroom canary is
+    # validated. Default remains latest for a fresh non-canary checkout.
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:${LITELLM_IMAGE_TAG:-latest}
     container_name: litellm
     restart: unless-stopped
     depends_on: [litellm-db]
