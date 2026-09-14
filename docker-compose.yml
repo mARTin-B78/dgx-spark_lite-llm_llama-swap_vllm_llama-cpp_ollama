@@ -328,11 +328,15 @@ services:
       - UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username for the LiteLLM web UI
       - UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password for the LiteLLM web UI
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}  # Optional: only needed for semantic-router embeddings
+      # Empty is safe: no model is compressed until an external LiteLLM alias
+      # is deliberately allowlisted in the ignored .env file.
+      - HEADROOM_EXTERNAL_MODELS=${HEADROOM_EXTERNAL_MODELS:-}
     # - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}  # Uncomment to enforce API key auth
     volumes:
       - ${REPO_CONFIG_PATH}/LiteLLM/config.yaml:/app/config.yaml
       - ${REPO_CONFIG_PATH}/LiteLLM/router.json:/app/router.json:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/complexity_hook.py:/app/complexity_hook.py:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/headroom_hook.py:/app/headroom_hook.py:ro
     command:
       - "--config"
       - "/app/config.yaml"
