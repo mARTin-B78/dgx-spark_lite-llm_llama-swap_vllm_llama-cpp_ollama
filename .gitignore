@@ -19,6 +19,7 @@ ds4/
 *.o
 *.sqlite
 *.pid
+LiteLLM/backup/
 
 # --- Runtime Logs & State ---
 logs/

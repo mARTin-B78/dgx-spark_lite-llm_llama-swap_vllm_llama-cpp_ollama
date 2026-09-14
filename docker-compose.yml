@@ -129,7 +129,9 @@ services:
   llama-qwen35-4b:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
     container_name: llama-qwen35-4b
-    restart: unless-stopped
+    # Opt-in only: this persistent local model must never start with the stack.
+    restart: "no"
+    profiles: ["always-on-qwen"]
     ipc: host
     security_opt:
       - seccomp:unconfined
@@ -183,7 +185,9 @@ services:
   llama-qwen36-27b:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
     container_name: llama-qwen36-27b
-    restart: unless-stopped
+    # Opt-in only: this persistent local model must never start with the stack.
+    restart: "no"
+    profiles: ["always-on-qwen"]
     ipc: host
     security_opt:
       - seccomp:unconfined
@@ -310,27 +314,23 @@ services:
   # ==========================================
   # 5. LITELLM (The Unified API Gateway)
   # ==========================================
-  # Single OpenAI-compatible endpoint (:14000) in front of all inference services.
-  # Internal port is 4000; mapped to 14000 externally to avoid the DGX
-  # NoMachine port conflict on 4000.
-  # The master key is intentionally disabled by default — the stack runs with
-  # open API access and UI-only authentication. Uncomment LITELLM_MASTER_KEY
-  # to require sk-* tokens on every API call.
+  # Single authenticated OpenAI-compatible endpoint (:4000) in front of all
+  # inference services. Credentials are read only from the ignored .env file.
   litellm:
-    # Pin this deployment through ignored .env while the Headroom canary is
-    # validated. Default remains latest for a fresh non-canary checkout.
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:${LITELLM_IMAGE_TAG:-latest}
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:${LITELLM_IMAGE_TAG:-headroom-canary}
     container_name: litellm
     restart: unless-stopped
     depends_on: [litellm-db]
     ports:
-      - "14000:4000"  # External 14000 → internal 4000 (avoids NoMachine conflict)
+      - "4000:4000"
     environment:
       - DATABASE_URL=${DATABASE_URL}        # postgresql://litellm_admin:PW@litellm-db:5432/litellm
-      - UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username for the LiteLLM web UI
-      - UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password for the LiteLLM web UI
+      - LITELLM_UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username, sourced from ignored .env
+      - LITELLM_UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password, sourced from ignored .env
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}  # API/UI master key; sourced from ignored .env
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}  # Optional: only needed for semantic-router embeddings
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       # Empty is safe: no model is compressed until an external LiteLLM alias
       # is deliberately allowlisted in the ignored .env file.
       - HEADROOM_EXTERNAL_MODELS=${HEADROOM_EXTERNAL_MODELS:-}
@@ -343,8 +343,38 @@ services:
       - "--config"
       - "/app/config.yaml"
       - "--port"
-      - "4000"   # Keep this at 4000 internally (mapped to 14000 externally)
-    networks: [dgx_net]
+      - "4000"
+    networks: [dgx_net, headroom_net]
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # Compresses/cache external-provider traffic only. Local DGX aliases remain
+  # direct through dgx_net and never pass through this service.
+  headroom:
+    image: headroom-full:0.37.0
+    container_name: headroom
+    restart: unless-stopped
+    entrypoint: ["headroom", "proxy"]
+    command: ["--host", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      - HEADROOM_TELEMETRY=off
+      - HEADROOM_MODE=cache
+    volumes:
+      - headroom_workspace:/home/nonroot/.headroom
+      - headroom_models:/home/nonroot/.cache/huggingface
+    networks:
+      headroom_net:
+        aliases: [headroom]
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 
 
   # ==========================================
@@ -405,6 +435,14 @@ services:
 networks:
   dgx_net:
     external: true  # Create once with: docker network create dgx_net
+  # Private bridge for LiteLLM ↔ Headroom; not published to the LAN.
+  headroom_net:
 
 volumes:
   litellm_db_data:  # Persistent Postgres data for LiteLLM (keys, usage logs, budgets)
+  headroom_workspace:
+    external: true
+    name: headroom_headroom_workspace
+  headroom_models:
+    external: true
+    name: headroom_headroom_models
