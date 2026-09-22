@@ -216,21 +216,25 @@ services:
     restart: unless-stopped
     depends_on: [litellm-db]
     ports:
-      - "14000:4000"  # External 14000 → internal 4000 (avoids NoMachine conflict)
+      - "4000:4000"  # External 4000 → internal 4000
     environment:
       - DATABASE_URL=${DATABASE_URL}        # postgresql://litellm_admin:PW@litellm-db:5432/litellm
-      - UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username for the LiteLLM web UI
-      - UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password for the LiteLLM web UI
+      - LITELLM_UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username for the LiteLLM web UI
+      - LITELLM_UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password for the LiteLLM web UI
+      - LITELLM_LOG=WARNING  # Suppress routine 30-second DB sync INFO messages
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}  # Optional: only needed for semantic-router embeddings
     # - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}  # Uncomment to enforce API key auth
     volumes:
       - ${REPO_CONFIG_PATH}/LiteLLM/config.yaml:/app/config.yaml
       - ${REPO_CONFIG_PATH}/LiteLLM/router.json:/app/router.json:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/logging.yaml:/app/logging.yaml:ro
     command:
       - "--config"
       - "/app/config.yaml"
       - "--port"
-      - "4000"   # Keep this at 4000 internally (mapped to 14000 externally)
+      - "4000"   # Keep this at 4000 internally and externally
+      - "--log_config"
+      - "/app/logging.yaml"
     networks: [dgx_net]
 
 

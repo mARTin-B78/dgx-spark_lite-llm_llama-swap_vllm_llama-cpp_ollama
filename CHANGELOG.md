@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-09-22
+
+### Added
+- **Large-model lifecycle guards**: shared admission locking, repeated available-memory
+  checks, scoped container watchdogs, and tests protect the host while loading the new
+  Qwen and DeepSeek profiles.
+- **Qwen3.8-27B-Uncensored-NVFP4-DFlash2**: pinned downloader, guarded SGLang launcher,
+  LiteLLM/llama-swap registration, setup notes, and live smoke-test tooling.
+- **Qwen3.8-Flash-Next NVMe offload** and **DeepSeek-V4-Flash-0731-IQ2XXS-DS4**:
+  reproducible launch/download scripts, DS4 container provenance, 128K–262K context
+  profiles, operational documentation, and API smoke tests.
+- **Benchmark operations**: an overnight Qwen3.8 benchmark runner and a safe helper for
+  fast-forwarding the embedded vLLM builder checkout.
+- **LiteLLM logging configuration**: warning-level, secret-redacted proxy logs.
+
+### Changed
+- **llama-swap sample config**: refreshed for the current model inventory while
+  preserving placeholders for private paths and host-specific values.
+- **Model inventory**: retired local model profiles are disabled after the documented
+  cleanup, while persistent local services remain opt-in and heavyweight standalone
+  Compose services use explicit profiles.
+- **Image publishing**: `build_and_push.sh` prefers the active GitHub CLI credential over
+  a stale token from `.env`.
+
+### Fixed
+- **llama-swap**: the DFlash2 KV pool sizing notes now live in the real config too,
+  so they survive future sample regeneration.
+- **Benchmark CLI arguments**: prompt, generation, and depth value lists are expanded as
+  repeated integer arguments instead of being passed as one space-delimited value.
+- **DeepSeek legacy launcher**: exits with an actionable message when removed legacy
+  weights or the optional drafter are absent.
+
+
+---
+
 ## [0.12.2] — 2026-09-14
 
 ### Security
@@ -399,7 +434,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 <!-- version diff links — update tags in GitHub after each release -->
-[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.12.2...v0.13.0
+[0.12.2]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.12.1...v0.12.2
+[0.12.1]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.10.2...v0.11.0

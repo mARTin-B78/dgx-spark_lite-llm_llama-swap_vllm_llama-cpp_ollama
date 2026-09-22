@@ -24,6 +24,17 @@ BATCHED_SESSIONS="${BATCHED_SESSIONS:-1}"
 ENABLE_DSPARK="${ENABLE_DSPARK:-0}"
 GPU_VRAM="${GPU_VRAM:-88}"
 
+# Legacy weights/drafter removed during the user-approved cleanup (2026-09-21).
+# The current 0731 model is served through llama-swap's launch-deepseek-0731.sh.
+if [[ ! -f "$MODEL_PATH" ]]; then
+  echo "Legacy DeepSeek weights are absent. Use DeepSeek-V4-Flash-0731-IQ2XXS-DS4 in llama-swap." >&2
+  exit 66
+fi
+if [[ "$ENABLE_DSPARK" == "1" && ! -f "$DSPARK_DRAFTER" ]]; then
+  echo "Legacy DSpark drafter is absent; use the 0731 profile without speculation." >&2
+  exit 66
+fi
+
 DSPARK_ARGS=()
 if [ "${ENABLE_DSPARK}" = "1" ]; then
   DSPARK_ARGS=(--mtp "${DSPARK_DRAFTER}" --dspark)

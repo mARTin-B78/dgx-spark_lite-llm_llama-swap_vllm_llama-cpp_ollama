@@ -1,0 +1,33 @@
+version: 1
+disable_existing_loggers: false
+formatters:
+  plain:
+    format: '%(asctime)s %(name)s %(levelname)s: %(message)s'
+filters:
+  secret_redaction:
+    '()': litellm._logging.SecretRedactionFilter
+  correlation:
+    '()': litellm._logging.CorrelationContextFilter
+handlers:
+  stderr:
+    class: logging.StreamHandler
+    formatter: plain
+    filters: [secret_redaction, correlation]
+    stream: ext://sys.stderr
+loggers:
+  LiteLLM:
+    level: WARNING
+    handlers: [stderr]
+    propagate: false
+  LiteLLM Proxy:
+    level: WARNING
+    handlers: [stderr]
+    propagate: false
+  LiteLLM Router:
+    level: WARNING
+    handlers: [stderr]
+    propagate: false
+  uvicorn.access:
+    level: WARNING
+    handlers: [stderr]
+    propagate: false

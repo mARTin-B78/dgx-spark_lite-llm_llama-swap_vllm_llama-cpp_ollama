@@ -20,9 +20,13 @@ ds4/
 *.sqlite
 *.pid
 LiteLLM/backup/
+LiteLLM/config.yaml.before-*
+data/gsm8k/
+ds4-0731-container/ds4-server
 
 # --- Runtime Logs & State ---
 logs/
+runs/
 
 # --- Setup Output (auto-generated, not tracked) ---
 setup/SETUP_SUMMARY.txt
@@ -46,3 +50,7 @@ SONARQUBE-LLM-GUIDE.md
 # --- Personal Notes (local only) ---
 todo.md
 TODO.md
+
+# Local artifacts for SSD Qwen / DeepSeek 0731 integration
+ds4-0731/
+llama-swap/runtime/

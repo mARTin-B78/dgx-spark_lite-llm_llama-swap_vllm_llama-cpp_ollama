@@ -31,6 +31,14 @@ IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-${GH_USER:-}}"
 REGISTRY_USER="${REGISTRY_USER:-${GH_USER:-}}"
 REGISTRY_TOKEN="${REGISTRY_TOKEN:-${GH_PAT:-}}"
 
+# Prefer the active GitHub CLI credential when available. This prevents a
+# stale GH_PAT in .env from causing GHCR scope failures after re-authentication.
+if command -v gh >/dev/null 2>&1; then
+    if GH_CLI_TOKEN="$(env -u GH_TOKEN -u GITHUB_TOKEN gh auth token 2>/dev/null)" && [ -n "$GH_CLI_TOKEN" ]; then
+        REGISTRY_TOKEN="$GH_CLI_TOKEN"
+    fi
+fi
+
 if [ -z "$IMAGE_NAMESPACE" ]; then
     echo "❌ Error: IMAGE_NAMESPACE (or GH_USER) not set in .env"
     exit 1

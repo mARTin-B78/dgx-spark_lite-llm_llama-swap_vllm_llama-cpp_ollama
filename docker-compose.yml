@@ -31,6 +31,11 @@ version: '3.8'
 #    ${IMAGE_NAMESPACE:-${GH_USER}}, so just set them in .env and run as usual.
 # 3. `docker network create dgx_net`  (if you didn't already)
 # 4. `docker compose up -d`
+#
+# HEADROOM NOTE:
+# The loopback-only Headroom service handles external-provider aliases
+# (OpenAI, Anthropic, Gemini, OpenRouter). Local DGX aliases stay direct and
+# continue to work independently over dgx_net.
 # ==============================================================================
 
 
@@ -328,9 +333,13 @@ services:
       - LITELLM_UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username, sourced from ignored .env
       - LITELLM_UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password, sourced from ignored .env
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}  # API/UI master key; sourced from ignored .env
+      - LITELLM_LOG=WARNING  # Suppress routine 30-second DB sync INFO messages
+      - STORE_MODEL_IN_DB=true  # Preserve the setting used by the deployed Portainer stack
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}  # Optional: only needed for semantic-router embeddings
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - HEADROOM_PROXY_TOKEN=${HEADROOM_PROXY_TOKEN:-}
       # Empty is safe: no model is compressed until an external LiteLLM alias
       # is deliberately allowlisted in the ignored .env file.
       - HEADROOM_EXTERNAL_MODELS=${HEADROOM_EXTERNAL_MODELS:-}
@@ -339,11 +348,14 @@ services:
       - ${REPO_CONFIG_PATH}/LiteLLM/router.json:/app/router.json:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/complexity_hook.py:/app/complexity_hook.py:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/headroom_hook.py:/app/headroom_hook.py:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/logging.yaml:/app/logging.yaml:ro
     command:
       - "--config"
       - "/app/config.yaml"
       - "--port"
       - "4000"
+      - "--log_config"
+      - "/app/logging.yaml"
     networks: [dgx_net, headroom_net]
     logging:
       driver: json-file
@@ -402,7 +414,9 @@ services:
   sglang:
     image: scitrera/dgx-spark-sglang:0.5.9-t5
     container_name: sglang
-    restart: unless-stopped
+    # Manual only: excluded from ordinary stack deployments.
+    restart: "no"
+    profiles: ["manual-models"]
     ipc: host
     security_opt:
       - seccomp:unconfined

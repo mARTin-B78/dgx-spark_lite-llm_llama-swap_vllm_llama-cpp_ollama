@@ -1,0 +1,7 @@
+{
+  "source": "https://github.com/Entrpi/ds4",
+  "commit": "76d51ef82a81b70b78e51a3a6ea11946286de976",
+  "build": "make cuda-spark -j2",
+  "image": "local/ds4-0731:76d51ef",
+  "image_id": "sha256:2ad914b64e54350cd688bcf76d6ce6871a38457e5c59a576b6ac661613cf3045"
+}

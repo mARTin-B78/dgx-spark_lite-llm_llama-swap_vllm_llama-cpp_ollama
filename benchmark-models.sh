@@ -922,14 +922,21 @@ run_benchy() {
     local -a bench_base_cmd
     read -ra bench_base_cmd <<< "$BENCHY_CMD"
 
+    # The benchmarker expects repeated integer arguments, not one
+    # space-separated string (e.g. --depth 0 16384).
+    local -a pp_args tg_args depth_args
+    read -ra pp_args <<< "$PP"
+    read -ra tg_args <<< "$TG"
+    read -ra depth_args <<< "$DEPTH"
+
     # Build shared base args (used by all runs) as an array — avoids eval,
     # so a model name containing shell metacharacters can't be interpreted.
     local -a base_args=(
         --base-url "$LLAMA_SWAP_URL/v1"
         --model "$model"
-        --pp "$PP"
-        --tg "$TG"
-        --depth "$DEPTH"
+        --pp "${pp_args[@]}"
+        --tg "${tg_args[@]}"
+        --depth "${depth_args[@]}"
         --runs "$RUNS"
         --latency-mode generation
         --no-warmup
