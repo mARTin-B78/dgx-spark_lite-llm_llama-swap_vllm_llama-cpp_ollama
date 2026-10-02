@@ -340,14 +340,14 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - HEADROOM_PROXY_TOKEN=${HEADROOM_PROXY_TOKEN:-}
-      # Empty is safe: no model is compressed until an external LiteLLM alias
-      # is deliberately allowlisted in the ignored .env file.
       - HEADROOM_EXTERNAL_MODELS=${HEADROOM_EXTERNAL_MODELS:-}
+      - LITELLM_CUSTOM_PROVIDER=anthropic_header_strip.proxy_handler_instance
     volumes:
       - ${REPO_CONFIG_PATH}/LiteLLM/config.yaml:/app/config.yaml
       - ${REPO_CONFIG_PATH}/LiteLLM/router.json:/app/router.json:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/complexity_hook.py:/app/complexity_hook.py:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/headroom_hook.py:/app/headroom_hook.py:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/anthropic_header_strip.py:/app/anthropic_header_strip.py:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/logging.yaml:/app/logging.yaml:ro
     command:
       - "--config"
@@ -365,30 +365,6 @@ services:
 
   # Compresses/cache external-provider traffic only. Local DGX aliases remain
   # direct through dgx_net and never pass through this service.
-  headroom:
-    image: headroom-full:0.37.0
-    container_name: headroom
-    restart: unless-stopped
-    entrypoint: ["headroom", "proxy"]
-    command: ["--host", "0.0.0.0"]
-    ports:
-      - "127.0.0.1:8787:8787"
-    environment:
-      - HEADROOM_TELEMETRY=off
-      - HEADROOM_MODE=cache
-    volumes:
-      - headroom_workspace:/home/nonroot/.headroom
-      - headroom_models:/home/nonroot/.cache/huggingface
-    networks:
-      headroom_net:
-        aliases: [headroom]
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
-
-
   # ==========================================
   # 6. LITELLM DATABASE (PostgreSQL)
   # ==========================================
@@ -454,9 +430,3 @@ networks:
 
 volumes:
   litellm_db_data:  # Persistent Postgres data for LiteLLM (keys, usage logs, budgets)
-  headroom_workspace:
-    external: true
-    name: headroom_headroom_workspace
-  headroom_models:
-    external: true
-    name: headroom_headroom_models
