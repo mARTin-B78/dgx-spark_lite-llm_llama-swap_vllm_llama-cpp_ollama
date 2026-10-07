@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-07
+
+### Added
+- **Huihui Qwen3.8-27B FP8**: guarded single-Spark SGLang launcher with a 64K context,
+  BF16 KV cache, and a pinned checkpoint revision.
+- **LiteLLM priority forwarding**: pass validated key priority to the llama-swap backend
+  after deployment resolution, so aliases route correctly without forwarding it remotely.
+- **Velo deployment guide**: document the TP=1 recipe for running Velo on a single Spark.
+
+### Fixed
+- **Huihui SGLang cancellation**: abort discarded requests before removing tokenizer state,
+  including requests rejected before scheduler dispatch.
+
 ## [0.13.0] — 2026-09-22
 
 ### Added
@@ -434,7 +447,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 <!-- version diff links — update tags in GitHub after each release -->
-[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.12.2...v0.13.0
 [0.12.2]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.12.0...v0.12.1

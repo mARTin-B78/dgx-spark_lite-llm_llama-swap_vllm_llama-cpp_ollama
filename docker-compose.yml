@@ -348,6 +348,7 @@ services:
       - ${REPO_CONFIG_PATH}/LiteLLM/complexity_hook.py:/app/complexity_hook.py:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/headroom_hook.py:/app/headroom_hook.py:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/anthropic_header_strip.py:/app/anthropic_header_strip.py:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/priority_hook.py:/app/priority_hook.py:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/logging.yaml:/app/logging.yaml:ro
     command:
       - "--config"
