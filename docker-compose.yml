@@ -352,6 +352,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
       - HF_TOKEN=${HF_TOKEN:-}  # Hugging Face Inference Providers (fine-grained, "Make calls to Inference Providers" only)
       - HEADROOM_PROXY_TOKEN=${HEADROOM_PROXY_TOKEN:-}
       - HEADROOM_EXTERNAL_MODELS=${HEADROOM_EXTERNAL_MODELS:-}
