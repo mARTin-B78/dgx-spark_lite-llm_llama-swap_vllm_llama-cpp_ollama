@@ -135,7 +135,7 @@ services:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
     container_name: llama-qwen35-4b
     # Opt-in only: this persistent local model must never start with the stack.
-    restart: "no"
+    restart: unless-stopped
     profiles: ["always-on-qwen"]
     ipc: host
     security_opt:
@@ -168,7 +168,7 @@ services:
       - --n-gpu-layers
       - "99"
       - --ctx-size
-      - "131072"
+      - "262144"
       - --jinja
       - --chat-template-kwargs
       - '{"enable_thinking":false}'
@@ -247,7 +247,8 @@ services:
     container_name: llama-swap
     restart: unless-stopped
     ports:
-      - "28080:8080"  # Host 28080 → container 8080 (avoid conflict with other services)
+      - "192.168.178.8:28080:8080"
+      - "127.0.0.1:28080:8080"
     entrypoint: ["/usr/bin/llama-swap", "-config", "/app/config.yaml", "-listen", "0.0.0.0:8080"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -325,11 +326,23 @@ services:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:${LITELLM_IMAGE_TAG:-headroom-canary}
     container_name: litellm
     restart: unless-stopped
-    depends_on: [litellm-db]
+    mem_limit: 2g
+    memswap_limit: 2g
+    depends_on:
+      litellm-db:
+        condition: service_started
+      litellm-redis:
+        condition: service_healthy
     ports:
-      - "4000:4000"
+      - "192.168.178.8:4000:4000"
+      - "127.0.0.1:4000:4000"
     environment:
       - DATABASE_URL=${DATABASE_URL}        # postgresql://litellm_admin:PW@litellm-db:5432/litellm
+      - REDIS_HOST=litellm-redis
+      - REDIS_PORT=6379
+      - GPU_PRIORITY_ENABLED=${GPU_PRIORITY_ENABLED:-true}
+      - GPU_PRIORITY_ENDPOINTS=llama-swap:8080,llama-qwen35-4b:19001,ollama:11434,192.168.178.8:19001,192.168.178.8:19002,192.168.178.8:8020,192.168.178.8:8021,192.168.178.8:8022,192.168.178.8:8023,192.168.178.8:8090,192.168.178.8:8098
+      - LITELLM_WORKER_STARTUP_HOOKS=gpu_priority_hook:install_middleware
       - LITELLM_UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username, sourced from ignored .env
       - LITELLM_UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password, sourced from ignored .env
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}  # API/UI master key; sourced from ignored .env
@@ -339,6 +352,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - HF_TOKEN=${HF_TOKEN:-}  # Hugging Face Inference Providers (fine-grained, "Make calls to Inference Providers" only)
       - HEADROOM_PROXY_TOKEN=${HEADROOM_PROXY_TOKEN:-}
       - HEADROOM_EXTERNAL_MODELS=${HEADROOM_EXTERNAL_MODELS:-}
       - LITELLM_CUSTOM_PROVIDER=anthropic_header_strip.proxy_handler_instance
@@ -348,7 +362,11 @@ services:
       - ${REPO_CONFIG_PATH}/LiteLLM/complexity_hook.py:/app/complexity_hook.py:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/headroom_hook.py:/app/headroom_hook.py:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/anthropic_header_strip.py:/app/anthropic_header_strip.py:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/pin_guard.py:/app/pin_guard.py:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/priority_hook.py:/app/priority_hook.py:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/gpu_priority_hook.py:/app/gpu_priority_hook.py:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/gpu_admission.py:/app/gpu_admission.py:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/pin:/app/pin:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/logging.yaml:/app/logging.yaml:ro
     command:
       - "--config"
@@ -357,12 +375,26 @@ services:
       - "4000"
       - "--log_config"
       - "/app/logging.yaml"
-    networks: [dgx_net, headroom_net]
+    networks: [dgx_net, headroom_net, redis_net]
     logging:
       driver: json-file
       options:
         max-size: "20m"
         max-file: "5"
+
+  litellm-redis:
+    image: redis:7-alpine
+    container_name: litellm-redis
+    restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks: [redis_net]
 
   # Compresses/cache external-provider traffic only. Local DGX aliases remain
   # direct through dgx_net and never pass through this service.
@@ -375,12 +407,14 @@ services:
     image: postgres:15-alpine
     container_name: litellm-postgres
     restart: unless-stopped
+    mem_limit: 1g
+    memswap_limit: 1g
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "15432:5432"
+      - "127.0.0.1:15432:5432"
     volumes:
       - litellm_db_data:/var/lib/postgresql/data
     networks: [dgx_net]
@@ -392,7 +426,7 @@ services:
     image: scitrera/dgx-spark-sglang:0.5.9-t5
     container_name: sglang
     # Manual only: excluded from ordinary stack deployments.
-    restart: "no"
+    restart: unless-stopped
     profiles: ["manual-models"]
     ipc: host
     security_opt:
@@ -401,7 +435,8 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     ports:
-      - "30000:30000" # Default SGLang port
+      - "192.168.178.8:30000:30000"
+      - "127.0.0.1:30000:30000"
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
     deploy:
@@ -428,6 +463,8 @@ networks:
     external: true  # Create once with: docker network create dgx_net
   # Private bridge for LiteLLM ↔ Headroom; not published to the LAN.
   headroom_net:
+  redis_net:
+    internal: true
 
 volumes:
   litellm_db_data:  # Persistent Postgres data for LiteLLM (keys, usage logs, budgets)

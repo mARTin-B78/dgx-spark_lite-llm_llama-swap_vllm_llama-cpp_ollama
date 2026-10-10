@@ -3,6 +3,7 @@ read by LiteLLM's router scheduler (LOWER served first): body = 100 - key priori
 Local llama-swap aliases also receive extra_body.priority for their backend scheduler.
 Overwrites any client-supplied priority; keys without a valid metadata.priority are untouched."""
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 try:
     from litellm.integrations.custom_logger import CustomLogger
@@ -26,9 +27,20 @@ class PriorityHook(CustomLogger):
 
     async def async_pre_call_deployment_hook(self, kwargs: dict, call_type: Any = None) -> Optional[dict]:
         model = kwargs.get("model", "")
+        if not isinstance(model, str):
+            return kwargs
         if model.startswith("openai/"):
             model = model.removeprefix("openai/")
-        if model not in ("Huihui-Qwen3.8-27B-abliterated-FP8", "dgx-spark-local") or "llama-swap" not in (kwargs.get("api_base") or ""):
+        if model not in ("Huihui-Qwen3.8-27B-abliterated-FP8", "dgx-spark-local"):
+            return kwargs
+        api_base = kwargs.get("api_base")
+        if not isinstance(api_base, str):
+            return kwargs
+        try:
+            backend = urlsplit(api_base)
+        except ValueError:
+            return kwargs
+        if backend.scheme not in ("http", "https") or backend.hostname != "llama-swap":
             return kwargs
         request_metadata = kwargs.get("metadata")
         metadata = request_metadata.get("user_api_key_metadata") if isinstance(request_metadata, dict) else None

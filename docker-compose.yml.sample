@@ -214,11 +214,20 @@ services:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:latest
     container_name: litellm
     restart: unless-stopped
-    depends_on: [litellm-db]
+    depends_on:
+      litellm-db:
+        condition: service_started
+      litellm-redis:
+        condition: service_healthy
     ports:
       - "4000:4000"  # External 4000 → internal 4000
     environment:
       - DATABASE_URL=${DATABASE_URL}        # postgresql://litellm_admin:PW@litellm-db:5432/litellm
+      - REDIS_HOST=litellm-redis
+      - REDIS_PORT=6379
+      - GPU_PRIORITY_ENABLED=${GPU_PRIORITY_ENABLED:-false}
+      - GPU_PRIORITY_ENDPOINTS=${GPU_PRIORITY_ENDPOINTS:-llama-swap:8080,llama-qwen35-4b:19001,ollama:11434}
+      - LITELLM_WORKER_STARTUP_HOOKS=gpu_priority_hook:install_middleware
       - LITELLM_UI_USERNAME=${LITELLM_UI_USERNAME}  # Admin username for the LiteLLM web UI
       - LITELLM_UI_PASSWORD=${LITELLM_UI_PASSWORD}  # Admin password for the LiteLLM web UI
       - LITELLM_LOG=WARNING  # Suppress routine 30-second DB sync INFO messages
@@ -227,6 +236,9 @@ services:
     volumes:
       - ${REPO_CONFIG_PATH}/LiteLLM/config.yaml:/app/config.yaml
       - ${REPO_CONFIG_PATH}/LiteLLM/router.json:/app/router.json:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/priority_hook.py:/app/priority_hook.py:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/gpu_priority_hook.py:/app/gpu_priority_hook.py:ro
+      - ${REPO_CONFIG_PATH}/LiteLLM/gpu_admission.py:/app/gpu_admission.py:ro
       - ${REPO_CONFIG_PATH}/LiteLLM/logging.yaml:/app/logging.yaml:ro
     command:
       - "--config"
@@ -235,8 +247,20 @@ services:
       - "4000"   # Keep this at 4000 internally and externally
       - "--log_config"
       - "/app/logging.yaml"
-    networks: [dgx_net]
+    networks: [dgx_net, redis_net]
 
+  litellm-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks: [redis_net]
 
   # ==========================================
   # 6. LITELLM DATABASE (PostgreSQL)
@@ -264,6 +288,8 @@ services:
 networks:
   dgx_net:
     external: true  # Create once with: docker network create dgx_net
+  redis_net:
+    internal: true
 
 volumes:
   litellm_db_data:  # Persistent Postgres data for LiteLLM (keys, usage logs, budgets)

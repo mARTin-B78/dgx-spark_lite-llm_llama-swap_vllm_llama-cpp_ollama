@@ -57,4 +57,10 @@ for model in ("openrouter/qwen/qwen3.8-27b:free", "Qwen3.5-4B-Q4_K_M-always-on")
     original = {"model": "openai/" + model, "api_base": "http://llama-swap:8080/v1", "extra_body": {"priority": 99}}
     assert deploy({"priority": 80}, original.copy())["extra_body"] == {"priority": 99}
 assert deploy({"priority": 80}, {"model": "openai/dgx-spark-local", "api_base": "https://remote.example/v1", "extra_body": {"priority": 99}})["extra_body"] == {"priority": 99}
+for base in ("https://llama-swap.remote.example/v1", "https://remote.example/llama-swap/v1", "http://llama-swap@remote.example/v1", "llama-swap", "http://[", None, 1):
+    original = {"model": "openai/dgx-spark-local", "api_base": base, "extra_body": {"priority": 99}}
+    assert deploy({"priority": 80}, original.copy())["extra_body"] == {"priority": 99}
+for model in (None, 1, []):
+    original = {"model": model, "api_base": "http://llama-swap:8080/v1"}
+    assert "extra_body" not in deploy({"priority": 80}, original)
 print("priority_hook selftest ok")

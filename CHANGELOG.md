@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-10
+
+### Added
+- **GPU admission control**: LiteLLM middleware and Redis-backed priority queue admit one
+  local-GPU inference request at a time by key priority (`gpu_admission.py`,
+  `gpu_priority_hook.py`, `litellm-redis` on an internal network).
+- **Model pinning**: `pin_guard.py`, `scripts/pin-model.sh`, `scripts/revert-default-alias.sh`.
+- **Operations scripts**: priority key creation, priority smoke test, LiteLLM DB backup, and
+  `refresh-openrouter-aliases.py` (keeps OpenRouter free aliases/fallbacks alive).
+
+### Changed
+- LiteLLM, llama-swap and SGLang ports bind to the LAN address and localhost only;
+  Postgres binds to localhost; LiteLLM, Postgres and Redis get memory limits.
+
+### Fixed
+- **GPU admission middleware**: also installed at callback import, because the worker
+  startup hook alone left requests unwrapped ("request context missing" on inference).
+- **OpenRouter fallbacks**: add a chain for `gemma-4-31b-it:free` and block
+  `inkling-small:free` (403 outside agentic harnesses).
+
 ## [0.14.0] — 2026-10-07
 
 ### Added
@@ -447,7 +467,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 <!-- version diff links — update tags in GitHub after each release -->
-[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.12.2...v0.13.0
 [0.12.2]: https://github.com/mARTin-B78/dgx-spark_lite-llm_llama-swap_vllm_llama-cpp_ollama/compare/v0.12.1...v0.12.2

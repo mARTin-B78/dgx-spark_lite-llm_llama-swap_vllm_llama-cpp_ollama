@@ -26,7 +26,9 @@ sets `extra_body.priority` from the same validated key metadata after deployment
 resolution, which also covers the public `default` alias. LiteLLM flattens
 that field into the backend request, so the FP8 SGLang launcher can order its
 waiting requests even when the deployment is healthy. Other aliases retain
-their previous behavior. This requires `dgx-spark-local` to route to the FP8
+their previous behavior. Forwarding requires the resolved API URL's hostname
+to be exactly `llama-swap`; remote URLs containing that name are excluded.
+This requires `dgx-spark-local` to route to the FP8
 backend; the previous NVFP4 launcher does not enable priority scheduling.
 
 The FP8 launcher schedules lower values first, defaults unspecified priorities
@@ -37,6 +39,42 @@ but lets an already-running background request finish. Set
 retracting and re-prefilling lower-priority requests; test streamed continuity
 and eventual background completion before enabling it for normal traffic.
 This scheduler covers one resident model, not independent OCR/STT/TTS processes.
+
+The [suggested vLLM recipe](https://gist.github.com/jetnet/f8a069c90e40b4fad28ba65c66c91a40)
+uses `--scheduling-policy priority` and negative/zero/positive body priorities.
+The active local FP8 launcher uses SGLang, so retain its existing flags and the
+five key tiers above. `max_parallel_requests` is a per-key admission cap: excess
+requests receive HTTP 429 rather than joining a priority queue. It reserves no
+realtime capacity, and multiple keys each get their own cap. The launcher's
+`--max-running-requests 1` allows one running request; realtime traffic must wait
+for it to finish with the default preemption setting. Retry rejected background
+requests with bounded backoff in the caller.
+
+For a manual check, use existing P0 and P4 keys with `scripts/test-priority.sh`
+(`MODEL=dgx-spark-local`, `LITELLM_URL=http://localhost:4000`, and keys supplied
+through environment variables). With the P4 cap of one, concurrent P4 requests
+may return 429; their elapsed times alone do not prove backend queue ordering.
+Do not run the key-creation helper merely to test: it creates credentials and
+prints them, and credential handling must follow the KeePass policy.
+
+Redis backs shared LiteLLM coordination counters through
+`general_settings.coordination_redis`; it does not enable response caching.
+Add this mapping under the existing `general_settings` in `LiteLLM/config.yaml`:
+
+```yaml
+general_settings:
+  coordination_redis:
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+```
+
+The isolated `redis:7-alpine` service publishes no ports, limits the container
+to 256 MiB, and caps Redis data at 128 MiB.
+The Redis service keeps these counters ephemeral, so restarting it resets
+in-flight admission accounting. Its `noeviction` policy preserves existing
+counters when memory is full, but new writes fail; monitor memory and errors.
+Apply the updated Compose service and private LiteLLM configuration by
+redeploying the local Portainer stack before relying on shared counters.
 
 Redeploy: `docker compose up -d litellm`. Rollback: remove the `priority_hook` callback line and volume line
 (`LiteLLM/config.yaml.bak2` holds the previous config), then redeploy.
