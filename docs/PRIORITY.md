@@ -11,7 +11,7 @@ LiteLLM 1.100.0's router scheduler serves LOWER body priority first.
 | P1 | P1-Interactive | 80 | 20 | 8 |
 | P2 | P2-Normal | 60 | 40 | 4 |
 | P3 | P3-Automation | 40 | 60 | 2 |
-| P4 | P4-Background | 20 | 80 | 1 |
+| P4 | P4-Background | 20 | 80 | 2 |
 
 Check: `python3 tests/test_priority_hook.py`. Configure virtual-key metadata through
 the existing LiteLLM key-management interface.
