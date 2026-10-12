@@ -6,6 +6,8 @@ import time
 import os
 import subprocess
 import json
+from unittest.mock import patch
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 spec = importlib.util.spec_from_file_location('probe', Path(__file__).parents[1] / 'scripts/test_priority.py')
@@ -93,7 +95,81 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
 
 
+def check_preflight_diagnostics():
+    secret = 'secret-marker-key-alias-http://private.example/token'
+    class Response:
+        status = 200
+        def __init__(self, payload):
+            self.raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def read(self, limit):
+            return self.raw[:limit]
+    def call(payload, tier='P0', route=False, failure=None):
+        with patch.object(probe.urllib.request.OpenerDirector, 'open', return_value=Response(payload), side_effect=failure):
+            result = (probe.model_route('http://localhost', secret, 'mock', 'llama-swap', 1)
+                      if route else probe.key_info('http://localhost', secret, tier, 1))
+        assert secret not in json.dumps(result), result
+        return result
+    valid = {'info': {'metadata': {'priority': 100}, 'blocked': None, 'max_parallel_requests': None}}
+    assert call(valid)['valid']
+    for code in (401, 403, 404, 429, 500):
+        for route in (False, True):
+            result = call({}, route=route, failure=urllib.error.HTTPError(secret, code, secret, {}, None))
+            assert result['status'] == code and result['error'] == 'http_error', result
+    for route in (False, True):
+        result = call({}, route=route, failure=urllib.error.URLError(secret))
+        assert result['status'] == 0 and result['error'] == 'transport_error', result
+        assert call(secret.encode(), route=route)['error'] == 'invalid_json'
+        assert call(None, route=route)['error'] == 'invalid_schema'
+    cases = [
+        ({}, 'missing_info'),
+        ({'info': {}}, 'missing_metadata'),
+        ({'info': {'metadata': secret}}, 'invalid_metadata'),
+        ({'info': {'metadata': {}}}, 'missing_priority'),
+    ]
+    for field, value, error in (
+        ('priority', secret, 'invalid_priority'), ('priority', True, 'invalid_priority'),
+        ('priority', 20, 'priority_mismatch'), ('blocked', True, 'key_blocked'),
+        ('blocked', secret, 'invalid_blocked'), ('blocked', 0, 'invalid_blocked'),
+        ('max_parallel_requests', secret, 'invalid_max_parallel_requests'),
+        ('max_parallel_requests', 0, 'invalid_max_parallel_requests'),
+        ('max_parallel_requests', True, 'invalid_max_parallel_requests'),
+    ):
+        payload = json.loads(json.dumps(valid))
+        target = payload['info']['metadata'] if field == 'priority' else payload['info']
+        target[field] = value
+        cases.append((payload, error))
+    for field in ('blocked', 'max_parallel_requests'):
+        payload = json.loads(json.dumps(valid))
+        del payload['info'][field]
+        cases.append((payload, 'missing_' + field))
+    for payload, error in cases:
+        result = call(payload)
+        assert result['status'] == 200 and result['error'] == error and not result['valid'], result
+    valid['info']['metadata']['priority'] = 20
+    valid['info']['max_parallel_requests'] = 1
+    assert call(valid, 'P4')['error'] == 'insufficient_max_parallel_requests'
+    valid['info']['max_parallel_requests'] = 2
+    assert call(valid, 'P4')['valid']
+    deployment = {'model_name': 'mock', 'litellm_params': {'api_base': 'http://llama-swap:8080'}}
+    assert call({'data': [deployment]}, route=True)['valid']
+    for payload, error in (
+        ({}, 'missing_data'), ({'data': {}}, 'invalid_schema'),
+        ({'data': []}, 'model_not_found'),
+        ({'data': [{'model_name': 'mock', 'litellm_params': {'api_base': 'invalid'}}]}, 'invalid_api_base'), ({'data': [None]}, 'invalid_schema'),
+        ({'data': [{'model_name': 'mock', 'litellm_params': {}}]}, 'missing_api_base'),
+        ({'data': [{'model_name': 'mock', 'litellm_params': {'api_base': secret}}]}, 'backend_mismatch'),
+        ({'data': [{'model_name': 'mock', 'litellm_params': {'api_base': 'http://other'}}]}, 'backend_mismatch'),
+    ):
+        result = call(payload, route=True)
+        assert result['status'] == 200 and result['error'] == error and not result['valid'], result
+
+
 def main():
+    check_preflight_diagnostics()
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

@@ -115,45 +115,99 @@ def request(url, key, model, tier, phase, tokens, timeout, retries, ready=None):
     return result
 
 
+def preflight_json(base, path, key, timeout, result):
+    try:
+        req = urllib.request.Request(base + path, headers={'Authorization': 'Bearer ' + key})
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=timeout) as response:
+            result['status'] = response.status
+            raw = response.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                result['error'] = 'response_too_large'
+                return None
+            return json.loads(raw)
+    except urllib.error.HTTPError as exc:
+        result['status'] = exc.code
+        result['error'] = 'http_error'
+        exc.close()
+    except (ValueError, UnicodeError):
+        result['error'] = 'invalid_json'
+    except Exception:
+        # Only fixed codes reach output; response text and exceptions may contain secrets.
+        result['error'] = 'transport_error'
+    return None
+
+
 def key_info(base, key, tier, timeout):
     expected = 100 - 20 * int(tier[1])
     result = dict(preflight=tier, expected_priority=expected, actual_priority=None,
-                  max_parallel_requests=None, valid=False)
-    try:
-        req = urllib.request.Request(base + '/key/info', headers={'Authorization': 'Bearer ' + key})
-        with urllib.request.build_opener(NoRedirect).open(req, timeout=timeout) as response:
-            raw = response.read(1024 * 1024 + 1)
-            if len(raw) > 1024 * 1024:
-                raise ValueError()
-            info = json.loads(raw)['info']
-        priority = info['metadata']['priority']
-        cap = info['max_parallel_requests']
-        blocked = info['blocked']
-        result['actual_priority'] = priority if type(priority) is int else None
-        result['max_parallel_requests'] = cap if type(cap) is int else None
-        result['valid'] = (type(priority) is int and priority == expected
-                           and (blocked is False or blocked is None)
-                           and (cap is None or type(cap) is int and cap > 0)
-                           and (tier != 'P4' or cap is None or cap >= 2))
-    except Exception:
-        pass  # Server text and exception details must never reach output.
+                  max_parallel_requests=None, valid=False, status=0, error=None)
+    payload = preflight_json(base, '/key/info', key, timeout, result)
+    if result['error']:
+        return result
+    if not isinstance(payload, dict) or not isinstance(payload.get('info'), dict):
+        result['error'] = 'missing_info' if isinstance(payload, dict) and 'info' not in payload else 'invalid_schema'
+        return result
+    info = payload['info']
+    metadata = info.get('metadata')
+    if not isinstance(metadata, dict):
+        result['error'] = 'missing_metadata' if 'metadata' not in info else 'invalid_metadata'
+        return result
+    for field, source in (('priority', metadata), ('max_parallel_requests', info), ('blocked', info)):
+        if field not in source:
+            result['error'] = 'missing_' + field
+            return result
+    priority, cap, blocked = metadata['priority'], info['max_parallel_requests'], info['blocked']
+    result['actual_priority'] = priority if type(priority) is int else None
+    result['max_parallel_requests'] = cap if type(cap) is int else None
+    if type(priority) is not int:
+        result['error'] = 'invalid_priority'
+    elif priority != expected:
+        result['error'] = 'priority_mismatch'
+    elif blocked is True:
+        result['error'] = 'key_blocked'
+    elif blocked is not False and blocked is not None:
+        result['error'] = 'invalid_blocked'
+    elif cap is not None and (type(cap) is not int or cap <= 0):
+        result['error'] = 'invalid_max_parallel_requests'
+    elif tier == 'P4' and cap is not None and cap < 2:
+        result['error'] = 'insufficient_max_parallel_requests'
+    result['valid'] = result['error'] is None
     return result
 
 
 def model_route(base, key, model, expected_host, timeout):
-    result = dict(route_preflight=True, expected_backend_host=expected_host, valid=False)
-    try:
-        req = urllib.request.Request(base + '/model/info', headers={'Authorization': 'Bearer ' + key})
-        with urllib.request.build_opener(NoRedirect).open(req, timeout=timeout) as response:
-            raw = response.read(1024 * 1024 + 1)
-            if len(raw) > 1024 * 1024:
-                raise ValueError()
-            deployments = json.loads(raw)['data']
-        matches = [item for item in deployments if item['model_name'] == model]
-        hosts = [urlsplit(item['litellm_params']['api_base']).hostname for item in matches]
-        result['valid'] = bool(hosts) and all(host == expected_host for host in hosts)
-    except Exception:
-        pass
+    result = dict(route_preflight=True, expected_backend_host=expected_host,
+                  valid=False, status=0, error=None)
+    payload = preflight_json(base, '/model/info', key, timeout, result)
+    if result['error']:
+        return result
+    if not isinstance(payload, dict) or not isinstance(payload.get('data'), list):
+        result['error'] = 'missing_data' if isinstance(payload, dict) and 'data' not in payload else 'invalid_schema'
+        return result
+    hosts = []
+    for item in payload['data']:
+        if not isinstance(item, dict) or not isinstance(item.get('model_name'), str):
+            result['error'] = 'invalid_schema'
+            return result
+        if item['model_name'] != model:
+            continue
+        params = item.get('litellm_params')
+        if not isinstance(params, dict) or not isinstance(params.get('api_base'), str):
+            result['error'] = 'missing_api_base' if isinstance(params, dict) and 'api_base' not in params else 'invalid_schema'
+            return result
+        try:
+            host = urlsplit(params['api_base']).hostname
+        except ValueError:
+            host = None
+        if not host:
+            result['error'] = 'invalid_api_base'
+            return result
+        hosts.append(host)
+    if not hosts:
+        result['error'] = 'model_not_found'
+    elif any(host != expected_host for host in hosts):
+        result['error'] = 'backend_mismatch'
+    result['valid'] = result['error'] is None
     return result
 
 

@@ -114,6 +114,11 @@ keys into the environment. Five distinct keys are required; no keys are created.
 The probe first authenticates each key against `/key/info` and verifies metadata
 priorities 100, 80, 60, 40, 20. It reports only tier, numeric priority/cap and
 validation status, never the raw response (which can contain the key itself).
+Failed preflights include HTTP `status` and a fixed `error` code. For example,
+`401`/`http_error` means authentication was rejected, while `200`/`missing_priority`
+means key information was readable but lacked the required priority metadata.
+`0`/`transport_error` means no usable HTTP response was received. These diagnostics
+do not print server response bodies or exception details.
 P4 must allow at least two parallel requests, or be unlimited, for the blocker
 and its probe. Invalid or unreadable key configuration stops before inference.
 
