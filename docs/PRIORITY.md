@@ -119,6 +119,10 @@ Failed preflights include HTTP `status` and a fixed `error` code. For example,
 means key information was readable but lacked the required priority metadata.
 `0`/`transport_error` means no usable HTTP response was received. These diagnostics
 do not print server response bodies or exception details.
+Tier keys are normally `llm_api_routes`-only and receive 403 on `/key/info`. In that
+case also export `LITELLM_MASTER_KEY`: the probe then reads key metadata and
+`/model/info` with it (via `POST /v2/key/info`, key in the body) and still sends all
+inference with the tier keys. The master key is never printed or placed in a URL.
 P4 must allow at least two parallel requests, or be unlimited, for the blocker
 and its probe. Invalid or unreadable key configuration stops before inference.
 

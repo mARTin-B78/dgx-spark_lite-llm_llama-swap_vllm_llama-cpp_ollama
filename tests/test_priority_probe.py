@@ -115,6 +115,14 @@ def check_preflight_diagnostics():
         return result
     valid = {'info': {'metadata': {'priority': 100}, 'blocked': None, 'max_parallel_requests': None}}
     assert call(valid)['valid']
+    with patch.object(probe.urllib.request.OpenerDirector, 'open', return_value=Response({'key': [secret], 'info': [valid['info']]})) as opened:
+        admin = probe.key_info('http://localhost', secret, 'P0', 1, admin_key='admin-' + secret)
+    assert admin['valid'] and admin['status'] == 200, admin
+    sent = opened.call_args[0][0]
+    assert sent.full_url.endswith('/v2/key/info') and secret not in sent.full_url
+    assert sent.headers['Authorization'] == 'Bearer admin-' + secret
+    with patch.object(probe.urllib.request.OpenerDirector, 'open', return_value=Response({'key': [secret], 'info': []})):
+        assert probe.key_info('http://localhost', secret, 'P0', 1, admin_key='x')['error'] == 'key_not_found'
     for code in (401, 403, 404, 429, 500):
         for route in (False, True):
             result = call({}, route=route, failure=urllib.error.HTTPError(secret, code, secret, {}, None))

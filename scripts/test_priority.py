@@ -115,9 +115,13 @@ def request(url, key, model, tier, phase, tokens, timeout, retries, ready=None):
     return result
 
 
-def preflight_json(base, path, key, timeout, result):
+def preflight_json(base, path, key, timeout, result, body=None):
     try:
-        req = urllib.request.Request(base + path, headers={'Authorization': 'Bearer ' + key})
+        headers = {'Authorization': 'Bearer ' + key}
+        if body is not None:
+            headers['Content-Type'] = 'application/json'
+        req = urllib.request.Request(base + path, headers=headers,
+                                     data=None if body is None else json.dumps(body).encode())
         with urllib.request.build_opener(NoRedirect).open(req, timeout=timeout) as response:
             result['status'] = response.status
             raw = response.read(1024 * 1024 + 1)
@@ -137,17 +141,26 @@ def preflight_json(base, path, key, timeout, result):
     return None
 
 
-def key_info(base, key, tier, timeout):
+def key_info(base, key, tier, timeout, admin_key=None):
     expected = 100 - 20 * int(tier[1])
     result = dict(preflight=tier, expected_priority=expected, actual_priority=None,
                   max_parallel_requests=None, valid=False, status=0, error=None)
-    payload = preflight_json(base, '/key/info', key, timeout, result)
+    if admin_key:
+        # Tier keys are llm_api-only and cannot read /key/info; the admin key (never printed) can.
+        payload = preflight_json(base, '/v2/key/info', admin_key, timeout, result, body=dict(keys=[key]))
+    else:
+        payload = preflight_json(base, '/key/info', key, timeout, result)
     if result['error']:
         return result
-    if not isinstance(payload, dict) or not isinstance(payload.get('info'), dict):
+    info = payload.get('info') if isinstance(payload, dict) else None
+    if admin_key and isinstance(info, list):
+        if len(info) != 1:
+            result['error'] = 'key_not_found'
+            return result
+        info = info[0]
+    if not isinstance(info, dict):
         result['error'] = 'missing_info' if isinstance(payload, dict) and 'info' not in payload else 'invalid_schema'
         return result
-    info = payload['info']
     metadata = info.get('metadata')
     if not isinstance(metadata, dict):
         result['error'] = 'missing_metadata' if 'metadata' not in info else 'invalid_metadata'
@@ -217,7 +230,7 @@ def percentile(values, fraction):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__ + ' Required env: MODEL, P0_KEY through P4_KEY; optional LITELLM_URL. JSON lines, no credentials or response text.')
+    parser = argparse.ArgumentParser(description=__doc__ + ' Required env: MODEL, P0_KEY through P4_KEY; optional LITELLM_URL, LITELLM_MASTER_KEY (needed when tier keys are llm_api-only). JSON lines, no credentials or response text.')
     parser.add_argument('--timeout', type=float, default=60)
     parser.add_argument('--retries', type=int, default=0, help='429 retries only (0..3)')
     parser.add_argument('--tokens', type=int, default=32)
@@ -255,14 +268,15 @@ def main():
     watchdog.start()
     def emit(record):
         print(json.dumps(record), flush=True)
-    preflight = [key_info(base, key, tier, args.timeout) for key, tier in zip(keys, tiers)]
+    admin_key = os.environ.get('LITELLM_MASTER_KEY') or None  # optional: lets the probe read key metadata
+    preflight = [key_info(base, key, tier, args.timeout, admin_key) for key, tier in zip(keys, tiers)]
     for record in preflight:
         emit(record)
     if not all(record['valid'] for record in preflight):
         watchdog.cancel()
         emit(dict(error='key_preflight_failed'))
         return 1
-    route = model_route(base, keys[0], os.environ['MODEL'], args.expected_backend_host, args.timeout)
+    route = model_route(base, admin_key or keys[0], os.environ['MODEL'], args.expected_backend_host, args.timeout)
     emit(route)
     if not route['valid']:
         watchdog.cancel()
