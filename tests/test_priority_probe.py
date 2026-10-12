@@ -164,11 +164,12 @@ def check_preflight_diagnostics():
     assert call(valid, 'P4')['valid']
     deployment = {'model_name': 'mock', 'litellm_params': {'api_base': 'http://llama-swap:8080'}}
     assert call({'data': [deployment]}, route=True)['valid']
+    hidden = call({'data': [{'model_name': 'mock', 'litellm_params': {}}]}, route=True)
+    assert hidden['valid'] and hidden['host_checked'] is False, hidden
     for payload, error in (
         ({}, 'missing_data'), ({'data': {}}, 'invalid_schema'),
         ({'data': []}, 'model_not_found'),
         ({'data': [{'model_name': 'mock', 'litellm_params': {'api_base': 'invalid'}}]}, 'invalid_api_base'), ({'data': [None]}, 'invalid_schema'),
-        ({'data': [{'model_name': 'mock', 'litellm_params': {}}]}, 'missing_api_base'),
         ({'data': [{'model_name': 'mock', 'litellm_params': {'api_base': secret}}]}, 'backend_mismatch'),
         ({'data': [{'model_name': 'mock', 'litellm_params': {'api_base': 'http://other'}}]}, 'backend_mismatch'),
     ):

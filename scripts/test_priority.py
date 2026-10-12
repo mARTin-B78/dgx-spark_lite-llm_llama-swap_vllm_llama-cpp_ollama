@@ -198,6 +198,7 @@ def model_route(base, key, model, expected_host, timeout):
         result['error'] = 'missing_data' if isinstance(payload, dict) and 'data' not in payload else 'invalid_schema'
         return result
     hosts = []
+    matched = 0
     for item in payload['data']:
         if not isinstance(item, dict) or not isinstance(item.get('model_name'), str):
             result['error'] = 'invalid_schema'
@@ -205,8 +206,12 @@ def model_route(base, key, model, expected_host, timeout):
         if item['model_name'] != model:
             continue
         params = item.get('litellm_params')
+        if isinstance(params, dict) and 'api_base' not in params:
+            # LiteLLM omits api_base from /model/info; each response header is verified instead.
+            matched += 1
+            continue
         if not isinstance(params, dict) or not isinstance(params.get('api_base'), str):
-            result['error'] = 'missing_api_base' if isinstance(params, dict) and 'api_base' not in params else 'invalid_schema'
+            result['error'] = 'invalid_schema'
             return result
         try:
             host = urlsplit(params['api_base']).hostname
@@ -216,7 +221,9 @@ def model_route(base, key, model, expected_host, timeout):
             result['error'] = 'invalid_api_base'
             return result
         hosts.append(host)
-    if not hosts:
+        matched += 1
+    result['host_checked'] = bool(hosts)
+    if not matched:
         result['error'] = 'model_not_found'
     elif any(host != expected_host for host in hosts):
         result['error'] = 'backend_mismatch'

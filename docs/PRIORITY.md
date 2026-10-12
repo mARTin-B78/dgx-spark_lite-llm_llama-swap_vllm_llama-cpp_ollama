@@ -133,6 +133,8 @@ checks the configured route rather than assuming every LiteLLM model uses the GP
 Every streamed response must also identify that host through LiteLLM's
 `x-litellm-model-api-base` response header; missing or different backend evidence
 makes the measurement inconclusive. Raw header values are not printed.
+LiteLLM omits `api_base` from `/model/info`, so the preflight only confirms the model
+exists (`host_checked: false`); the per-response header is the authoritative host check.
 
 After a successful warmup, `--rounds 3` measures each tier alone, then submits
 P4 through P0 while a longer P4 stream is active, repeated three times. JSON lines
