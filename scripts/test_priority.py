@@ -115,7 +115,7 @@ def request(url, key, model, tier, phase, tokens, timeout, retries, ready=None):
     return result
 
 
-def preflight_json(base, path, key, timeout, result, body=None):
+def preflight_json(base, path, key, timeout, result, body=None, limit=1024 * 1024):
     try:
         headers = {'Authorization': 'Bearer ' + key}
         if body is not None:
@@ -124,8 +124,8 @@ def preflight_json(base, path, key, timeout, result, body=None):
                                      data=None if body is None else json.dumps(body).encode())
         with urllib.request.build_opener(NoRedirect).open(req, timeout=timeout) as response:
             result['status'] = response.status
-            raw = response.read(1024 * 1024 + 1)
-            if len(raw) > 1024 * 1024:
+            raw = response.read(limit + 1)
+            if len(raw) > limit:
                 result['error'] = 'response_too_large'
                 return None
             return json.loads(raw)
@@ -191,7 +191,7 @@ def key_info(base, key, tier, timeout, admin_key=None):
 def model_route(base, key, model, expected_host, timeout):
     result = dict(route_preflight=True, expected_backend_host=expected_host,
                   valid=False, status=0, error=None)
-    payload = preflight_json(base, '/model/info', key, timeout, result)
+    payload = preflight_json(base, '/model/info', key, timeout, result, limit=32 * 1024 * 1024)  # lists every deployment
     if result['error']:
         return result
     if not isinstance(payload, dict) or not isinstance(payload.get('data'), list):
