@@ -51,7 +51,8 @@ def admission():
         from redis.asyncio import Redis
         from gpu_admission import GPUAdmission
         client = Redis(host=os.getenv("REDIS_HOST", "redis"), port=int(os.getenv("REDIS_PORT", "6379")), password=os.getenv("REDIS_PASSWORD") or None, socket_connect_timeout=2, socket_timeout=2)
-        _gate = GPUAdmission(client)
+        _gate = GPUAdmission(client, reserved_p0_waiters=int(
+            os.getenv("GPU_PRIORITY_P0_RESERVED_WAITERS", "1")))
     return _gate
 
 

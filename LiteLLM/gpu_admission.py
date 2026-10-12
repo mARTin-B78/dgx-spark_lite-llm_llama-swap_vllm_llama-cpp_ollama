@@ -29,7 +29,9 @@ for _, dead in ipairs(redis.call('ZRANGEBYSCORE', expiry, '-inf', now)) do
   redis.call('HDEL', tickets, dead)
 end
 if op == 'enqueue' then
-  if redis.call('ZCARD', q) >= tonumber(ARGV[5]) then return -1 end
+  local limit = tonumber(ARGV[5])
+  if tonumber(ARGV[3]) ~= 0 then limit = limit-tonumber(ARGV[6]) end
+  if redis.call('ZCARD', q) >= limit then return -1 end
   local n = redis.call('INCR', seq)
   local member = string.format('%020.0f', n)..':'..id
   redis.call('ZADD', q, tonumber(ARGV[3]), member)
@@ -66,8 +68,10 @@ return redis.error_reply('invalid operation')
 class GPUAdmission:
     def __init__(self, redis_client, *, key_prefix="litellm:gpu-admission",
                  max_waiters=128, wait_timeout=120.0, lease_ttl=30.0,
-                 poll_interval=0.05):
+                 poll_interval=0.05, reserved_p0_waiters=1):
         if (type(max_waiters) is not int or not 1 <= max_waiters <= 128
+                or type(reserved_p0_waiters) is not int
+                or not 0 <= reserved_p0_waiters <= max_waiters
                 or any(not math.isfinite(v) or v <= 0
                        for v in (wait_timeout, lease_ttl, poll_interval))):
             raise ValueError("invalid GPU admission limits")
@@ -75,6 +79,7 @@ class GPUAdmission:
         self.keys = [key_prefix + ':' + part for part in
                      ('queue', 'expiry', 'tickets', 'sequence', 'active')]
         self.max_waiters = max_waiters
+        self.reserved_p0_waiters = reserved_p0_waiters
         self.wait_timeout = wait_timeout
         self.lease_ms = max(1, math.ceil(lease_ttl * 1000))
         self.poll_interval = poll_interval
@@ -97,7 +102,8 @@ class GPUAdmission:
         deadline = asyncio.get_running_loop().time() + self.wait_timeout
         try:
             result = await self._call('enqueue', ticket, priority,
-                                      math.ceil(self.wait_timeout * 1000), self.max_waiters)
+                                      math.ceil(self.wait_timeout * 1000), self.max_waiters,
+                                      self.reserved_p0_waiters)
             if result == -1:
                 raise AdmissionQueueFull("GPU admission queue full")
             while True:
