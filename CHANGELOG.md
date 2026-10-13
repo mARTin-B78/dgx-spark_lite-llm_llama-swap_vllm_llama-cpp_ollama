@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Tutorial**: `docs/TUTORIAL-PRIORITY-GB10.md` explains the P0–P4 setup (keys, hook, Redis gate,
+  P0 lane, backend concurrency, measurement) step by step.
+
 ## [0.16.0] — 2026-10-13
 
 ### Added
