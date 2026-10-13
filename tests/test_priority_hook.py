@@ -21,6 +21,16 @@ def deploy(meta, data):
 for meta in ({"priority": 100}, {"priority": 20}, {}, None, {"priority": "high"}, {"priority": True}, {"priority": 500}):
     assert run(meta, {"priority": 99, "model": "m"}) == {"model": "m"}
     assert run(meta, {"model": "m"}) == {"model": "m"}
+# Background tier (metadata.priority <= 20) is capped at 64 generated tokens per request.
+body = lambda **kw: {"messages": [], **kw}
+assert run({"priority": 20}, body())["max_tokens"] == 64
+assert run({"priority": 20}, body(max_tokens=256))["max_tokens"] == 64
+assert run({"priority": 20}, body(max_tokens=10))["max_tokens"] == 10
+assert run({"priority": 20}, body(max_completion_tokens=500)) == {"messages": [], "max_completion_tokens": 64}
+assert run({"priority": 40}, body(max_tokens=256))["max_tokens"] == 256     # P3 unchanged
+assert "max_tokens" not in run({"priority": 40}, body())
+assert run({"priority": 20}, {"input": "x"}) == {"input": "x"}              # not a chat call
+assert "max_tokens" not in run({}, body())                                   # no metadata
 for model in ("Huihui-Qwen3.8-27B-abliterated-FP8", "dgx-spark-local"):
     data = {"model": model, "extra_body": {"priority": 999, "chat_template_kwargs": {"enable_thinking": False}}}
     result = run({"priority": 80}, data)

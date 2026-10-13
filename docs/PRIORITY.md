@@ -43,6 +43,25 @@ setup, explicitly add this variable to the service environment to override it.
 Queue overflow returns 429; queue timeout/storage failure returns 503. Per-key
 LiteLLM limits can reject requests before they reach this queue.
 
+## Reserved P0 execution slot and background token cap
+
+The gate has one shared execution slot for P1–P4 and, additionally, one slot only P0 may
+use (`GPU_PRIORITY_P0_EXECUTION_SLOTS`, default `1`, `0` restores the single-slot behaviour).
+A P0 request therefore starts immediately even while a P1–P4 request is generating; it
+does not interrupt that request. This is backend-independent: the backend must accept two
+concurrent requests (SGLang `--max-running-requests 2`, vLLM `--max-num-seqs` ≥ 2,
+llama.cpp `--parallel 2`). With a backend limit of one, the second request still waits
+inside the backend. vLLM's own priority scheduler orders only its waiting queue and
+preempts a running request just when KV cache is exhausted (`v1/core/sched/scheduler.py`),
+so the gate slot, not backend preemption, is what bounds P0 latency.
+Two simultaneous P0 requests occupy both slots; a third P0 request waits.
+
+Background keys (metadata.priority ≤ `PRIORITY_BACKGROUND_MAX_PRIORITY`, default 20, i.e. P4)
+have `max_tokens`/`max_completion_tokens` clamped to `PRIORITY_BACKGROUND_MAX_TOKENS`
+(default 64, `0` disables) by `priority_hook.py`. Callers split longer output into several
+requests; a clamped answer ends with `finish_reason: length`. This bounds how long a P4
+request can hold the main slot and the time P1–P3 wait behind it.
+
 The shared gate does not preempt a running request. Because only one request reaches
 the backend at a time, enabling SGLang preemption alone cannot let a queued P0
 interrupt P4. Keep background generations and OCR/audio batches short; split jobs

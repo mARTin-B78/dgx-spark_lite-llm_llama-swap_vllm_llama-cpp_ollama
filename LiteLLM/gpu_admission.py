@@ -1,4 +1,4 @@
-"""One shared GPU slot with Redis priority/FIFO admission and expiring leases."""
+"""One shared GPU slot (plus an optional P0-only slot) with Redis priority/FIFO admission and expiring leases."""
 import asyncio
 import math
 import uuid
@@ -18,7 +18,7 @@ class AdmissionTimeout(AdmissionError):
 
 # All queue mutations and ownership comparisons run atomically on Redis.
 _SCRIPT = """
-local q, expiry, tickets, seq, active = unpack(KEYS)
+local q, expiry, tickets, seq, active, active_p0 = unpack(KEYS)
 local op, id = ARGV[1], ARGV[2]
 local clock = redis.call('TIME')
 local now = tonumber(clock[1])*1000 + math.floor(tonumber(clock[2])/1000)
@@ -42,7 +42,13 @@ elseif op == 'claim' then
   local member = redis.call('HGET', tickets, id)
   if not member then return -1 end
   local first = redis.call('ZRANGE', q, 0, 0)[1]
-  if member == first and redis.call('SET', active, id, 'NX', 'PX', ARGV[3]) then
+  if member ~= first then return 0 end
+  local got = redis.call('SET', active, id, 'NX', 'PX', ARGV[3])
+  -- P0 sorts first (score 0), so only P0 can be head while waiting for its reserved slot.
+  if not got and ARGV[4] == '1' and redis.call('ZSCORE', q, member) == '0' then
+    got = redis.call('SET', active_p0, id, 'NX', 'PX', ARGV[3])
+  end
+  if got then
     redis.call('ZREM', q, member)
     redis.call('ZREM', expiry, id)
     redis.call('HDEL', tickets, id)
@@ -50,8 +56,10 @@ elseif op == 'claim' then
   end
   return 0
 elseif op == 'renew' then
-  if redis.call('GET', active) ~= id then return 0 end
-  redis.call('PEXPIRE', active, ARGV[3])
+  local slot = active
+  if redis.call('GET', slot) ~= id then slot = active_p0 end
+  if redis.call('GET', slot) ~= id then return 0 end
+  redis.call('PEXPIRE', slot, ARGV[3])
   return 1
 elseif op == 'remove' then
   local member = redis.call('HGET', tickets, id)
@@ -59,6 +67,7 @@ elseif op == 'remove' then
   redis.call('ZREM', expiry, id)
   redis.call('HDEL', tickets, id)
   if redis.call('GET', active) == id then redis.call('DEL', active) end
+  if redis.call('GET', active_p0) == id then redis.call('DEL', active_p0) end
   return 1
 end
 return redis.error_reply('invalid operation')
@@ -68,18 +77,20 @@ return redis.error_reply('invalid operation')
 class GPUAdmission:
     def __init__(self, redis_client, *, key_prefix="litellm:gpu-admission",
                  max_waiters=128, wait_timeout=120.0, lease_ttl=30.0,
-                 poll_interval=0.05, reserved_p0_waiters=1):
+                 poll_interval=0.05, reserved_p0_waiters=1, p0_execution_slots=0):
         if (type(max_waiters) is not int or not 1 <= max_waiters <= 128
                 or type(reserved_p0_waiters) is not int
                 or not 0 <= reserved_p0_waiters <= max_waiters
+                or p0_execution_slots not in (0, 1)
                 or any(not math.isfinite(v) or v <= 0
                        for v in (wait_timeout, lease_ttl, poll_interval))):
             raise ValueError("invalid GPU admission limits")
         self.redis = redis_client
         self.keys = [key_prefix + ':' + part for part in
-                     ('queue', 'expiry', 'tickets', 'sequence', 'active')]
+                     ('queue', 'expiry', 'tickets', 'sequence', 'active', 'active-p0')]
         self.max_waiters = max_waiters
         self.reserved_p0_waiters = reserved_p0_waiters
+        self.p0_execution_slots = p0_execution_slots
         self.wait_timeout = wait_timeout
         self.lease_ms = max(1, math.ceil(lease_ttl * 1000))
         self.poll_interval = poll_interval
@@ -107,7 +118,8 @@ class GPUAdmission:
             if result == -1:
                 raise AdmissionQueueFull("GPU admission queue full")
             while True:
-                result = await self._call('claim', ticket, self.lease_ms)
+                result = await self._call('claim', ticket, self.lease_ms,
+                                          str(self.p0_execution_slots))
                 if result == 1:
                     return GPULease(self, ticket)
                 remaining = deadline - asyncio.get_running_loop().time()

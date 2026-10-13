@@ -247,6 +247,7 @@ def main():
     parser.add_argument('--load-delay', type=float, default=.5)
     parser.add_argument('--expected-backend-host', default='llama-swap', help='required host of every matching deployment')
     parser.add_argument('--rounds', type=int, default=3, help='measurement rounds (1..10)')
+    parser.add_argument('--blocker-tier', default='P4', choices=['P3', 'P4'], help='tier of the long load request (P4 is clamped by the server token cap)')
     parser.add_argument('--p0-max-ttft', type=float, help='optional loaded P0 TTFT SLA in seconds')
     args = parser.parse_args()
     if not (0 < args.timeout <= 600 and 0 <= args.retries <= 3 and 1 <= args.tokens <= 4096 and 1 <= args.load_tokens <= 4096 and 0 <= args.load_delay <= 10 and 1 <= args.rounds <= 10 and (args.p0_max_ttft is None or 0 < args.p0_max_ttft <= 600)):
@@ -312,7 +313,7 @@ def main():
             current.append(run(tier, 'baseline', args.tokens))
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
             ready = threading.Event()
-            blocker = pool.submit(run, 'P4', 'load', args.load_tokens, ready)
+            blocker = pool.submit(run, args.blocker_tier, 'load', args.load_tokens, ready)
             ready.wait(args.timeout)
             time.sleep(args.load_delay)
             probes = [pool.submit(run, tier, 'under_load', args.tokens) for tier in reversed(tiers)]

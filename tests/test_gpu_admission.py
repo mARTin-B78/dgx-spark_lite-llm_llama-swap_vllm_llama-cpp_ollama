@@ -166,6 +166,37 @@ async def main():
             gate.redis = saved
         await lease.release()
 
+        # Reserved P0 execution slot: P0 starts at once beside a running P4, others still wait.
+        slot_prefix = prefix + ':p0slot'
+        slots = GPUAdmission(client, key_prefix=slot_prefix, lease_ttl=.6, wait_timeout=2,
+                             p0_execution_slots=1)
+        p4 = await acquire(slots, 80)
+        p0 = await asyncio.wait_for(acquire(slots, 0), .5)      # second slot, no wait
+        p1_task = asyncio.create_task(acquire(slots, 20))        # P1 must keep waiting
+        p0_third = asyncio.create_task(acquire(slots, 0))        # both slots busy: waits
+        await asyncio.sleep(.3)
+        assert not p1_task.done() and not p0_third.done()
+        await p0.release()                                       # frees the P0 slot -> next P0
+        third = await asyncio.wait_for(p0_third, .5)
+        assert not p1_task.done()
+        await third.release()
+        await asyncio.sleep(.1)
+        assert not p1_task.done()                                # P1 only gets the main slot
+        await p4.release()
+        await asyncio.wait_for(p1_task, .5)
+        await p1_task.result().release()
+        # Disabled (default): P0 queues behind a running P4 like everyone else.
+        single = GPUAdmission(client, key_prefix=slot_prefix + ':off', lease_ttl=.6, wait_timeout=2)
+        holder = await acquire(single, 80)
+        waiting = asyncio.create_task(acquire(single, 0))
+        await asyncio.sleep(.2)
+        assert not waiting.done()
+        await holder.release()
+        await (await asyncio.wait_for(waiting, .5)).release()
+        try: GPUAdmission(client, p0_execution_slots=2)
+        except ValueError: pass
+        else: raise AssertionError('invalid slot count accepted')
+
         for invalid in (-1,101,True,'0'):
             try: await gate.acquire(invalid)
             except ValueError: pass
