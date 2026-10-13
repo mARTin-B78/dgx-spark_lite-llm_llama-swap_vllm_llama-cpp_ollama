@@ -17,18 +17,14 @@ def deploy(meta, data):
     return asyncio.run(h.async_pre_call_deployment_hook(data, "completion"))
 
 
-assert run({"priority": 100}, {"priority": 99})["priority"] == 0      # overwrite client value
-assert run({"priority": 20}, {})["priority"] == 80                    # P4 -> served last
-assert run({}, {"priority": 5}) == {"priority": 5}                    # no metadata: untouched
-assert "priority" not in run(None, {})
-assert run({"priority": "high"}, {"priority": 5}) == {"priority": 5}  # non-int ignored
-assert run({"priority": True}, {}) == {}
-assert run({"priority": 500}, {})["priority"] == 0                    # clamp
-assert run({"priority": -5}, {})["priority"] == 100
+# The body `priority` must never survive: it would activate LiteLLM's buggy Redis scheduler queue.
+for meta in ({"priority": 100}, {"priority": 20}, {}, None, {"priority": "high"}, {"priority": True}, {"priority": 500}):
+    assert run(meta, {"priority": 99, "model": "m"}) == {"model": "m"}
+    assert run(meta, {"model": "m"}) == {"model": "m"}
 for model in ("Huihui-Qwen3.8-27B-abliterated-FP8", "dgx-spark-local"):
     data = {"model": model, "extra_body": {"priority": 999, "chat_template_kwargs": {"enable_thinking": False}}}
     result = run({"priority": 80}, data)
-    assert result["priority"] == 20
+    assert "priority" not in result
     assert result["extra_body"]["priority"] == 999  # backend forwarding waits for resolved deployment
     base = "http://llama-swap:8080/v1"
     result = deploy({"priority": 80}, {"model": "openai/" + model, "api_base": base, "extra_body": {"priority": 999, "chat_template_kwargs": {"enable_thinking": False}}})
@@ -52,7 +48,7 @@ for model in ("Huihui-Qwen3.8-27B-abliterated-FP8", "dgx-spark-local"):
             raise AssertionError("invalid extra_body accepted")
 for model in ("openrouter/qwen/qwen3.8-27b:free", "Qwen3.5-4B-Q4_K_M-always-on"):
     original = {"model": model, "extra_body": {"priority": 99}}
-    assert run({"priority": 80}, original.copy()) == {**original, "priority": 20}
+    assert run({"priority": 80}, original.copy()) == original
     assert "extra_body" not in run({"priority": 80}, {"model": model})
     original = {"model": "openai/" + model, "api_base": "http://llama-swap:8080/v1", "extra_body": {"priority": 99}}
     assert deploy({"priority": 80}, original.copy())["extra_body"] == {"priority": 99}

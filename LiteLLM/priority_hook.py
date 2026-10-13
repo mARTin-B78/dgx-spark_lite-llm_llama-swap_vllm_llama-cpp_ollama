@@ -1,7 +1,7 @@
-"""Priority hook: key metadata.priority (higher = more important, 0..100) -> request-body `priority`
-read by LiteLLM's router scheduler (LOWER served first): body = 100 - key priority.
-Local llama-swap aliases also receive extra_body.priority for their backend scheduler.
-Overwrites any client-supplied priority; keys without a valid metadata.priority are untouched."""
+"""Priority hook: key metadata.priority (higher = more important, 0..100) -> internal priority
+100 - key priority (LOWER served first), used by the GPU gate and, for local llama-swap FP8 aliases,
+forwarded as extra_body.priority. The request-body `priority` is removed: it would activate
+LiteLLM's router scheduler, whose Redis queue raises TypeError (tuple vs list) under concurrency."""
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
@@ -20,9 +20,7 @@ def body_priority(metadata: Any) -> Optional[int]:
 
 class PriorityHook(CustomLogger):
     async def async_pre_call_hook(self, user_api_key_dict: Any, cache: Any, data: dict, call_type: Any) -> Optional[dict]:
-        p = body_priority(getattr(user_api_key_dict, "metadata", None))
-        if p is not None:
-            data["priority"] = p
+        data.pop("priority", None)  # never let a client or LiteLLM's buggy scheduler see it
         return data
 
     async def async_pre_call_deployment_hook(self, kwargs: dict, call_type: Any = None) -> Optional[dict]:

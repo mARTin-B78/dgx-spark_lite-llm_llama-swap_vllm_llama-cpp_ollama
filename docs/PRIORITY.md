@@ -1,11 +1,16 @@
 # Request priority tiers
 
-Virtual keys carry `metadata.priority` (higher = more important). `LiteLLM/priority_hook.py`
-(pre-call hook) sets the request-body `priority` = `100 - metadata.priority` (clamped 0..100),
-overwriting any client value; keys without an integer `metadata.priority` are left untouched.
-LiteLLM 1.100.0's router scheduler serves LOWER body priority first.
+Virtual keys carry `metadata.priority` (higher = more important). The tier's internal
+priority is `100 - metadata.priority` (clamped 0..100; lower is served first) and is
+derived only from authenticated key metadata, never from the request. `LiteLLM/priority_hook.py`
+(pre-call hook) therefore **removes** any client-supplied top-level `priority` from the
+request body. Setting it would activate LiteLLM's own router scheduler, whose Redis-backed
+queue compares tuple and list entries (`litellm/scheduler.py`, `add_request`) and returns
+sporadic HTTP 500 under concurrent requests (reproduced 2026-10-13). Ordering is done by the
+shared Redis gate below and, for the FP8 backend, by `extra_body.priority`.
+Keys without an integer `metadata.priority` run as the default tier 40 in the gate.
 
-| Tier | Key alias | metadata.priority | Body priority | max_parallel |
+| Tier | Key alias | metadata.priority | Internal priority | max_parallel |
 |---|---|---|---|---|
 | P0 | P0-Realtime | 100 | 0 | unlimited |
 | P1 | P1-Interactive | 80 | 20 | 8 |
@@ -18,8 +23,6 @@ the existing LiteLLM key-management interface.
 Enable the hook by appending `priority_hook.proxy_handler_instance` to
 `litellm_settings.callbacks` in the private `LiteLLM/config.yaml`; preserve
 the other callbacks. Compose mounts the hook read-only into `/app`.
-Caveat: the scheduler only reorders requests while a model has NO healthy deployment (all cooled
-down); with a healthy deployment the request passes straight through (it is not a concurrency limiter).
 
 ## Shared local admission and P0 reservation
 
