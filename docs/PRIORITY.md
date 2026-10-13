@@ -119,6 +119,10 @@ Failed preflights include HTTP `status` and a fixed `error` code. For example,
 means key information was readable but lacked the required priority metadata.
 `0`/`transport_error` means no usable HTTP response was received. These diagnostics
 do not print server response bodies or exception details.
+When `MODEL` is a router alias (for example `default`, which maps to
+`Qwen3.8-27B-NVFP4-DFlash2` in `router_settings.model_group_alias`), `/model/info`
+does not list it; set `ROUTE_MODEL` to the deployment name for the preflight. Backend
+verification still comes from every response header.
 Tier keys are normally `llm_api_routes`-only and receive 403 on `/key/info`. In that
 case also export `LITELLM_MASTER_KEY`: the probe then reads key metadata and
 `/model/info` with it (via `POST /v2/key/info`, key in the body) and still sends all

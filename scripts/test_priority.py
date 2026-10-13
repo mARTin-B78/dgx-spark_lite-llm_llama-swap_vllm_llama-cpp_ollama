@@ -239,7 +239,7 @@ def percentile(values, fraction):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__ + ' Required env: MODEL, P0_KEY through P4_KEY; optional LITELLM_URL, LITELLM_MASTER_KEY (needed when tier keys are llm_api-only). JSON lines, no credentials or response text.')
+    parser = argparse.ArgumentParser(description=__doc__ + ' Required env: MODEL, P0_KEY through P4_KEY; optional LITELLM_URL, LITELLM_MASTER_KEY (needed when tier keys are llm_api-only), ROUTE_MODEL (deployment name when MODEL is a router alias such as default). JSON lines, no credentials or response text.')
     parser.add_argument('--timeout', type=float, default=60)
     parser.add_argument('--retries', type=int, default=0, help='429 retries only (0..3)')
     parser.add_argument('--tokens', type=int, default=32)
@@ -285,7 +285,7 @@ def main():
         watchdog.cancel()
         emit(dict(error='key_preflight_failed'))
         return 1
-    route = model_route(base, admin_key or keys[0], os.environ['MODEL'], args.expected_backend_host, args.timeout)
+    route = model_route(base, admin_key or keys[0], os.environ.get('ROUTE_MODEL') or os.environ['MODEL'], args.expected_backend_host, args.timeout)
     emit(route)
     if not route['valid']:
         watchdog.cancel()
