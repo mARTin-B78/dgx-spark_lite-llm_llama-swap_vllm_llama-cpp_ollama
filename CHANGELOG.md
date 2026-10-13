@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-10-13
+
+### Added
+- **Reserved P0 execution slot**: the Redis GPU gate can admit one P0 request beside a
+  running P1–P4 request (`GPU_PRIORITY_P0_EXECUTION_SLOTS`, default 1, `0` disables).
+  Measured on `default` → Qwen3.8-27B-NVFP4-DFlash2 with a 256-token P3 blocker: P0 TTFT
+  0.35 s p50 (was ~10 s). Requires a backend that accepts two concurrent requests.
+- **Background token cap**: keys with `metadata.priority` ≤ 20 are limited to 64 generated
+  tokens per request (`PRIORITY_BACKGROUND_MAX_TOKENS`, `PRIORITY_BACKGROUND_MAX_PRIORITY`).
+- **Repeatable P0–P4 live probe**: `scripts/test-priority.sh` (`scripts/test_priority.py`)
+  verifies key tiers, route and backend host, then reports TTFT/ordering per tier with an
+  optional P0 SLA; `ROUTE_MODEL` for router aliases, `LITELLM_MASTER_KEY` for llm_api-only
+  tier keys, `--blocker-tier P3|P4`. `scripts/validate-priority.sh` runs the deterministic
+  gate/hook checks against a disposable Redis without keys or GPU.
+
+### Changed
+- `priority_hook.py` removes the request-body `priority` instead of setting it.
+- P4 requests are truncated to 64 tokens (`finish_reason: length`); callers split longer work.
+- `docs/PRIORITY.md` documents the gate, the P0 slot, the cap and the validation steps.
+
+### Fixed
+- **Sporadic HTTP 500 under concurrent prioritised requests**: a body `priority` activated
+  LiteLLM's router scheduler, whose Redis queue compares tuple and list entries
+  (`litellm/scheduler.py`, `add_request`).
+
+
 ## [0.15.0] — 2026-10-10
 
 ### Added
