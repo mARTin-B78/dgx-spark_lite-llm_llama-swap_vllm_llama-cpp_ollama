@@ -126,7 +126,8 @@ def check_preflight_diagnostics():
     for code in (401, 403, 404, 429, 500):
         for route in (False, True):
             result = call({}, route=route, failure=urllib.error.HTTPError(secret, code, secret, {}, None))
-            assert result['status'] == code and result['error'] == 'http_error', result
+            expected = 'admin_key_required' if code == 403 and not route else 'http_error'
+            assert result['status'] == code and result['error'] == expected, result
     for route in (False, True):
         result = call({}, route=route, failure=urllib.error.URLError(secret))
         assert result['status'] == 0 and result['error'] == 'transport_error', result

@@ -151,6 +151,8 @@ def key_info(base, key, tier, timeout, admin_key=None):
     else:
         payload = preflight_json(base, '/key/info', key, timeout, result)
     if result['error']:
+        if result['status'] == 403 and not admin_key:
+            result['error'] = 'admin_key_required'  # tier keys are llm_api-only; export LITELLM_MASTER_KEY
         return result
     info = payload.get('info') if isinstance(payload, dict) else None
     if admin_key and isinstance(info, list):
