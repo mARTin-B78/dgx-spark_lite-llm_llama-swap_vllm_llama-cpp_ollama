@@ -13,7 +13,7 @@ exec bash "$(dirname "$0")/guard-large-model.sh" "qwen38-uncensored-$port" 44 \
   sha256:60166a99b6610e2b4b3febbeb6411e4cbc9338e996ab6c80d3339f86a7b5b9c3 \
   python3 -m sglang.launch_server \
   --model-path /models/qwen38 --served-model-name Qwen3.8-27B-Uncensored-NVFP4-DFlash2 \
-  --host "$host" --port "$port" --language-model-only \
+  --host "$host" --port "$port" \
   --attention-backend flashinfer --kv-cache-dtype fp8_e4m3 \
   --mem-fraction-static 0.70 --chunked-prefill-size 2048 \
   --context-length 65536 --max-total-tokens 65536 \

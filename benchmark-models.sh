@@ -942,6 +942,28 @@ run_benchy() {
         --no-warmup
         --skip-coherence
     )
+
+    # This SGLang build rejects streamed chat requests when llama-benchy's
+    # default return_token_ids=true is present. Let llama-benchy use the
+    # streamed usage counts instead, and point it at the checkpoint's actual
+    # tokenizer so pp/depth targets are sized with Qwen tokens rather than the
+    # GPT-2 fallback used for an unresolvable served-model alias.
+    if [[ "$model" == "Qwen3.8-27B-Uncensored-NVFP4-DFlash2" || "$model" == "Qwen3.8-27B-NVFP4-DFlash2" ]]; then
+        local qwen38_tokenizer
+        if [[ "$model" == "Qwen3.8-27B-Uncensored-NVFP4-DFlash2" ]]; then
+            qwen38_tokenizer="${QWEN38_UNCENSORED_TOKENIZER:-/home/sparky/LLMs/qwen38/Vtuber-plan/Qwen3.8-27B-Uncensored-NVFP4}"
+            [[ -d "$qwen38_tokenizer" ]] || qwen38_tokenizer="Vtuber-plan/Qwen3.8-27B-Uncensored-NVFP4"
+        else
+            qwen38_tokenizer="${QWEN38_TOKENIZER:-/home/sparky/LLMs/qwen38/RadixArk/Qwen3.8-27B-NVFP4}"
+            [[ -d "$qwen38_tokenizer" ]] || qwen38_tokenizer="RadixArk/Qwen3.8-27B-NVFP4"
+        fi
+        base_args+=(
+            --tokenizer "$qwen38_tokenizer"
+            --extra-body "return_token_ids=false"
+            --extra-body 'chat_template_kwargs={"enable_thinking":false}'
+        )
+    fi
+
     [[ -n "$CONCURRENCY" ]] && base_args+=(--concurrency "$CONCURRENCY")
     [[ "$MODE" == "arena" ]] && base_args+=(--enable-prefix-caching)
 
@@ -1160,6 +1182,8 @@ get_model_ram_budget() {
         Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4)                 echo "0.65-0.85" ;;
         Qwen3-Omni-30B-A3B-Instruct)                                  echo "0.60-0.75" ;;
         Qwen3-VL-30B-A3B-Instruct-FP8)                                echo "0.40-0.65" ;;
+        Qwen3.8-27B-Uncensored-NVFP4-DFlash2)                         echo "0.70" ;;
+        Qwen3.8-27B-NVFP4-DFlash2)                                    echo "0.58" ;;
         Qwen3.5-35B-A3B-FP8)                                          echo "0.55-0.71" ;;
         Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M)        echo "llama.cpp" ;;
         Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M-GGUF)   echo "llama.cpp" ;;
@@ -1183,6 +1207,8 @@ get_model_ram_budget() {
 get_model_max_len() {
     local model="$1"
     case "$model" in
+        Qwen3.8-27B-Uncensored-NVFP4-DFlash2)                         echo  65536 ;;
+        Qwen3.8-27B-NVFP4-DFlash2)                                    echo 262144 ;;
         Qwen3.5-35B-A3B-FP8)                                          echo 131072 ;;
         Qwen3.5-27B-Uncensored-DFlash-NVFP4)                          echo 200000 ;;
         Qwen3.6-27B-PrismaSCOUT-NVFP4)                                echo  32768 ;;
@@ -2112,11 +2138,12 @@ log ""
 [[ "$RESUME" == true ]] && load_resume_checkpoint
 init_checkpoint
 
-# Detect how llama-benchy is available: uvx (preferred), direct, or missing
-if uvx llama-benchy --help > /dev/null 2>&1; then
-    BENCHY_CMD="uvx llama-benchy"
-elif command -v llama-benchy > /dev/null 2>&1; then
+# Prefer the checked-out/direct build so reruns use the same revision as the
+# existing Qwen3.8 comparison artifacts instead of uvx's older stable release.
+if command -v llama-benchy > /dev/null 2>&1; then
     BENCHY_CMD="llama-benchy"
+elif uvx llama-benchy --help > /dev/null 2>&1; then
+    BENCHY_CMD="uvx llama-benchy"
 else
     log "${RED}Error: llama-benchy not found.${NC}"
     log ""

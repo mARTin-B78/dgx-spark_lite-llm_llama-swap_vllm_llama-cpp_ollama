@@ -168,7 +168,7 @@ services:
       - --n-gpu-layers
       - "99"
       - --ctx-size
-      - "262144"
+      - "32768"
       - --jinja
       - --chat-template-kwargs
       - '{"enable_thinking":false}'
