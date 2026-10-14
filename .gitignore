@@ -54,3 +54,6 @@ TODO.md
 # Local artifacts for SSD Qwen / DeepSeek 0731 integration
 ds4-0731/
 llama-swap/runtime/
+
+# local agent instructions
+CLAUDE.md
