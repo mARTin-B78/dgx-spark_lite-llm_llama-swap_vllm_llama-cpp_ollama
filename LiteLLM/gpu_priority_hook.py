@@ -1,5 +1,6 @@
 """Request-lifetime admission for configured local inference deployments."""
 import asyncio
+import logging
 from contextvars import ContextVar
 from importlib.metadata import version
 import os
@@ -8,6 +9,9 @@ from fastapi import HTTPException
 
 from priority_hook import CustomLogger, body_priority
 
+logger = logging.getLogger("gpu_priority_hook")
+_STT = {"transcription", "atranscription", "audio_transcription"}
+_TTS = {"speech", "aspeech", "text_to_speech"}
 _request = ContextVar("gpu_admission_request", default=None)
 _gate = None
 _INFERENCE = {"completion", "acompletion", "text_completion", "atext_completion", "embedding", "aembedding", "speech", "aspeech", "transcription", "atranscription", "image_generation", "aimage_generation", "responses", "aresponses"}
@@ -112,7 +116,7 @@ class GPUHook(CustomLogger):
 
     async def async_pre_call_deployment_hook(self, kwargs, call_type=None):
         call_type = getattr(call_type, "value", call_type)
-        if not enabled() or call_type not in _INFERENCE or endpoint(kwargs.get("api_base")) not in configured_endpoints():
+        if not enabled() or call_type in _STT | _TTS or call_type not in _INFERENCE or endpoint(kwargs.get("api_base")) not in configured_endpoints():
             return kwargs
         state = _request.get()
         if state is None:
@@ -120,12 +124,17 @@ class GPUHook(CustomLogger):
         async with state.lock:
             if state.lease is None:
                 from gpu_admission import AdmissionError, AdmissionQueueFull
+                started = asyncio.get_running_loop().time()
                 try:
                     state.lease = await admission().acquire(state.priority)
                 except AdmissionQueueFull:
                     raise HTTPException(429, "Local GPU admission queue full") from None
                 except AdmissionError:
                     raise HTTPException(503, "Local GPU admission unavailable") from None
+                finally:
+                    elapsed = asyncio.get_running_loop().time() - started
+                    if elapsed > 1:
+                        logger.warning("GPU admission wait %.3fs (priority=%s)", elapsed, state.priority)
                 state.watcher = asyncio.create_task(state.watch())
             if state.lease.lost.is_set():
                 raise RuntimeError("Local GPU admission lease lost")
