@@ -9,9 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-10-31
+
 ### Added
 - **Tutorial**: `docs/TUTORIAL-PRIORITY-GB10.md` explains the P0–P4 setup (keys, hook, Redis gate,
   P0 lane, backend concurrency, measurement) step by step.
+
+### Fixed
+- **Speech admission bypass**: speech requests are exempt from GPU admission blocking.
+- **llama-qwen35-4b stops**: restart policy `unless-stopped` and `--no-mmap` dropped (the
+  service was being SIGTERMed by earlyoom under low RAM).
+
+### Security
+- **LiteLLM pinned** to the verified image `local/workbench/litellm-spark:1.106.6-verified`
+  (Dockerfile base pinned by digest) after the LiteLLM 1.107.0 supply-chain incident of
+  2026-10-21; 1.100.0 and 1.106.x are unaffected.
+
+### Rollback
+- `git revert <release commit>`; for LiteLLM set `LITELLM_IMAGE=local/workbench/litellm-spark:rollback-1.100.0`
+  (never `:latest`, `main-stable` or `1.107.0`).
 
 ## [0.16.0] — 2026-10-13
 
