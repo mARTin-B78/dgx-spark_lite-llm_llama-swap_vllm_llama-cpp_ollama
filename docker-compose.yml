@@ -135,6 +135,7 @@ services:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/llama-cpp-spark:latest
     container_name: llama-qwen35-4b
     # Opt-in only: this persistent local model must never start with the stack.
+    # Auto-recovers after earlyoom kills (restart: unless-stopped).
     restart: unless-stopped
     profiles: ["always-on-qwen"]
     ipc: host
@@ -164,7 +165,6 @@ services:
       - Qwen3.5-4B-Q4_K_M
       - --parallel
       - "2"
-      - --no-mmap
       - --n-gpu-layers
       - "99"
       - --ctx-size
@@ -323,7 +323,9 @@ services:
   # Single authenticated OpenAI-compatible endpoint (:4000) in front of all
   # inference services. Credentials are read only from the ignored .env file.
   litellm:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-${GH_USER}}/litellm-spark:${LITELLM_IMAGE_TAG:-headroom-canary}
+    # Default image: the locally built verified image (local/workbench/litellm-spark:1.106.6-verified). LITELLM_IMAGE overrides it.
+    # Rebuild: docker build -f LiteLLM/litellm.Dockerfile -t local/workbench/litellm-spark:1.106.6-verified LiteLLM/
+    image: ${LITELLM_IMAGE:-local/workbench/litellm-spark:1.106.6-verified}
     container_name: litellm
     restart: unless-stopped
     mem_limit: 2g
