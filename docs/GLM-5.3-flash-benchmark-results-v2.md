@@ -131,3 +131,15 @@ c=1 reaches about 95 percent of the forum decode (28.1 vs 29.7) and 87-99 percen
 ### Driver incident (fact)
 
 `driver.sh` could not run `dbq.py` (relative path, wrong cwd), so it parsed `done=0 status=none` after the finished run (rc 0) and logged `KILL #1 cause: bench ended with infra failures` at 13:37:22, then killed and relaunched GLM. That was a false positive. `status.txt` of that driver is unreliable (0/104, run id `-`). The driver was stopped by pid. The v3b runner uses the real run id from the DB and checkpoint counts.
+
+## Combined 104-scenario result
+
+Combined from two runs, one pass each, not a single run:
+
+- Run `56b6369f` (v2.7.0 PATH CLI, 88 scenarios TC-01..88): 167/176 = 95/100.
+- Run `7c3bb8fa` (dev9 checkout, TC-89..104 Hard Mode, 16 scenarios): 25/32, 12 pass / 1 partial / 3 fail (TC-98 FAIL, TC-99 PARTIAL, TC-104 FAIL), 667 s.
+- Combined: 192/208 = **92.3**.
+
+Comparison: forum 93 (193/208 on 104 scenarios, v3.0.1.dev7) and our stitched v2 run `becf9b1d` (193/208). 192 vs 193 is 1 point apart, i.e. the same within noise. The "safety cap" label on the 16-scenario subset's standalone 78/100 is a subset artifact (partial scenario set), not a real cap.
+
+Data caveat: 4 runs (including `56b6369f`, plus 3 others) have a wrong stored `server_model_id`. Per llama-swap logs GLM served all requests (273 completions, one GLM container, no DS4 load); the cause is unproven and the DB was not modified. The v3 driver's `status.txt`/`dbq.py` bug produced the false "KILL #1" (see Driver incident).
