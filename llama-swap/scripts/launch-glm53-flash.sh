@@ -3,9 +3,10 @@
 # Build: cd /home/sparky/Docker/glm-5.3-one-spark && docker build -t glm53-one-spark-vllm:tp1-general23 .
 # Recipe default gpu-memory-utilization 0.90 starves the host on GB10. vLLM needs GMU x 121.7 GiB FREE in
 # cudaMemGetInfo at startup (page cache is NOT counted: drop caches first); vLLM sees ~5-6 GiB less than a bare
-# torch probe. Ladder by free CUDA memory (max GMU 0.86): >=103.5 GiB: 0.85/65536/1; >=99.5: 0.82/15360/1;
-# >=97.5: 0.80/8192/4. Default 0.78/8192/1: the only config that survived a full tool-eval run on 2026-11-02
-# (KV 11.65 GiB = 11,776 tokens, MemAvailable min ~3 GiB); 0.80/8192/4 was stopped by the 3 GiB guard under load.
+# torch probe. Needs >=103 GiB free by torch (about 105 after unloading other models).
+# Default (2026-11-03 v2): 0.76/262144/1, async off, draft block 1024, indexer rightsize: full 104-scenario run
+# 93/100 (thinking on), min MemAvailable 3.29 GiB, KV 5.56 GiB = 376k tokens. 0.80 and 0.78 at ctx 262144, and
+# 0.76 with seqs 4, were each stopped by the 3 GiB guard under load (see docs/GLM-5.3-flash-benchmark-results-v2.md).
 # Knobs reach the container both via sed (pinned ddc28b1 serve script) and ONE_SPARK_* env (recipe PR #4 script).
 # Garbage output on 2026-11-02 was 3 corrupt (sparse) weight shards, not the image: sha256-verify after download.
 set -euo pipefail
@@ -15,8 +16,8 @@ repo=/home/sparky/Docker/glm-5.3-one-spark
 # Optional local overrides (GLM53_IMAGE/GMU/CTX/SEQS/CACHE...) without a llama-swap restart; runtime/ is not committed.
 override="$(dirname "$0")/../runtime/glm53.env"
 [[ -f $override ]] && . "$override"
-gmu=${GLM53_GMU:-0.78}
-ctx=${GLM53_CTX:-8192}
+gmu=${GLM53_GMU:-0.76}
+ctx=${GLM53_CTX:-262144}
 seqs=${GLM53_SEQS:-1}
 models=/home/sparky/LLMs/glm53
 cache=${GLM53_CACHE:-/home/sparky/.cache/glm53-one-spark}
@@ -31,11 +32,11 @@ exec bash "$(dirname "$0")/guard-large-model.sh" "vllm-glm53-flash-$port" 60 \
   -e EXL3_FUSED_MOE=1 -e EXL3_MOE_ROW_TILE=0 -e EXL3_TEMP_ROWS_FUSED=128 \
   -e EXL3_FAT_SORTED=0 -e EXL3_FAT_BATCHED=0 -e EXL3_FAT_KERNEL=1 \
   -e GLM53_SUPPRESS_STOPS_IN_REASONING=1 -e GLM53_MIXED_PREFILL_CHUNK=skip \
-  -e GLM53_INDEXER_WORKSPACE=stock -e GLM53_SPINWAIT_MS=stock \
+  -e GLM53_INDEXER_WORKSPACE="${GLM53_INDEXER_WORKSPACE:-rightsize}" -e GLM53_SPINWAIT_MS=stock \
   -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=1800 \
   -e ONE_SPARK_HOST="$host" -e ONE_SPARK_PORT="$port" -e ONE_SPARK_K="${ONE_SPARK_K:-5}" \
   -e ONE_SPARK_UTIL="$gmu" -e ONE_SPARK_CTX="$ctx" -e ONE_SPARK_SEQS="$seqs" \
-  -e ONE_SPARK_ASYNC="${ONE_SPARK_ASYNC:-}" -e ONE_SPARK_DRAFT_BLOCK="${ONE_SPARK_DRAFT_BLOCK:-}" \
+  -e ONE_SPARK_ASYNC="${ONE_SPARK_ASYNC:-0}" -e ONE_SPARK_DRAFT_BLOCK="${ONE_SPARK_DRAFT_BLOCK:-1024}" \
   -e ONE_SPARK_MAMBA_SEED_FIX="${ONE_SPARK_MAMBA_SEED_FIX:-1}" \
   -v "$models/GLM-5.3-Flash-exl3-2.05bpw:/model:ro" \
   -v "$models/GLM-5.3-Flash-DFlash2:/draft:ro" \
