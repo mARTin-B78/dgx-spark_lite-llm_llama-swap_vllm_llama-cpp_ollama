@@ -44,15 +44,16 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 143' TERM INT HUP
-echo "[memory-guard] Starting $name; watchdog floor 10 GiB available." >&2
+floor=${GUARD_FLOOR_GIB:-10}  # opt-in per model; default unchanged
+echo "[memory-guard] Starting $name; watchdog floor $floor GiB available." >&2
 docker run --rm --name "$name" --cidfile "$cidfile" \
     --network "container:${routers[0]}" --device nvidia.com/gpu=all "$@" > >(tee "$root/runtime/$name.log") 2>&1 &
 runner=$!
 (
     while kill -0 "$runner" 2>/dev/null; do
         available=$(read_available)
-        if [[ ! "$available" =~ ^[0-9]+$ ]] || (( available < 10 * 1048576 )); then
-            echo "[memory-guard] EMERGENCY STOP $name: available=${available:-unknown} KiB, floor=10 GiB." >&2
+        if [[ ! "$available" =~ ^[0-9]+$ ]] || (( available < floor * 1048576 )); then
+            echo "[memory-guard] EMERGENCY STOP $name: available=${available:-unknown} KiB, floor=${floor} GiB." >&2
             # CID may not exist yet during docker create; keep watching until it does.
             if [[ -s "$cidfile" ]]; then stop_owned; exit 0; fi
         fi
