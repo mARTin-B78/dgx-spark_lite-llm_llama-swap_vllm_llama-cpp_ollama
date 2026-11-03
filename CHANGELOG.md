@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-11-03
+
+### Added
+- **GLM-5.3-Flash EXL3 2.05bpw** (vLLM + ExLlamaV3, DFlash2 drafter K=5): launch script
+  `llama-swap/scripts/launch-glm53-flash.sh`, llama-swap and LiteLLM entries
+  (`GLM-5.3-Flash-EXL3-2.05`), defaults GMU 0.76, ctx 262144, seqs 1.
+- **`GUARD_FLOOR_GIB`** opt-in in `guard-large-model.sh` (default unchanged, 10 GiB).
+- **Benchmarks**: tool-eval-bench 93/100 on 104 scenarios (combined 192/208); llama-benchy
+  c=1 about 28 tok/s decode, 500-565 tok/s prefill
+  (`docs/GLM-5.3-flash-benchmark-results-v2.md`).
+- **Recipe**: `docs/GLM-5.3-FLASH-RECIPE.md`.
+
+### Notes / Known issues
+- Memory-limited: stable GMU 0.76-0.78, seqs 1, ctx 262144; 0.80 and seqs 4 were stopped by the guard.
+- On GB10 page cache is not counted as free by CUDA; drop caches before launch.
+- Corrupt-shard lesson: 3 sparse weight shards gave garbage output; sha256-verify after download.
+- 4 stored runs in the benchmark DB have a wrong `server_model_id`; GLM served all requests.
+- TTS/STT must be stopped during GLM runs.
+- Drafter license CC BY-NC-ND 4.0 (non-commercial).
+
+### Rollback
+- `git revert <release commit>` or check out tag `v0.16.1`; remove the `GLM-5.3-Flash-EXL3-2.05`
+  entry from `llama-swap/config.yaml`; optionally `docker rmi glm53-one-spark-vllm:tp1-general23`.
+  Weights stay in `/home/sparky/LLMs/glm53`.
+
 ## [0.16.1] — 2026-10-31
 
 ### Added
