@@ -86,3 +86,48 @@ Note: relaunches exceeded the planned 3 because the cause was a config issue (ho
 ## Defaults and follow-ups
 
 The launch script defaults were changed to the stable config (0.76 / 262144 / seqs 1 / async 0 / draft block 1024 / rightsize). The host baseline (~18 GiB used by other services plus the 3 GiB guard) leaves no room for 0.80. To go higher, free host memory first (drop page cache, stop idle services) or test seqs 4 at a lower GMU. TTS/STT stay stopped and earlyoom stays off as the user set them.
+
+## v3 (uninterrupted run)
+
+Run `2026-11-03T11-46-11.863574Z_56b6369f`, GLM-5.3-Flash-EXL3-2.05, GMU 0.78, ctx 262144, seqs 1, `ONE_SPARK_ASYNC=0`, draft block 1024, K=5, indexer rightsize, thinking enabled (CLI default). Flags: `run --hardmode --seed 42 --parallel 1 --context-size 262144 --no-warmup --no-live`. Result line: `Score: 95 / 100 - Excellent`, 167/176 points, 88/88 scenarios, 3062 s, no infra failures, no container kill during the run (min MemAvailable 4.89 GiB).
+
+### Score per category (v3 vs v2 vs forum)
+
+| Cat | v3 (88 scn, 2.7.0) | v2 `becf9b1d` (104 scn, dev9) |
+|---|---|---|
+| A-F, H, J, N | 100% each | 100% each |
+| G Structured Reasoning | 4/6 (67) | 6/6 |
+| I Context & State | 19/20 (95) | 18/20 |
+| K | 26/26 | 24/26 |
+| L | 7/8 | 7/8 |
+| M Autonomous Planning | 4/6 (67) | 3/6 (50) |
+| O Structured Output | 9/12 (75) | 10/12 |
+| P Hard Mode | 38/38 (19 scn) | 65/70 (35 scn) |
+| Total | 167/176 = **95** | 193/208 = **93** |
+
+Forum: 93 (M 67, O 92). Non-pass in v3: TC-21 fail, TC-51 fail, TC-68 fail, TC-40/63/67 partial.
+
+### 88 versus 104 scenarios (fact)
+
+The v3 driver called the `tool-eval-bench` on PATH (`~/.local/share/uv/tools`, **v2.7.0**), which ships 88 scenarios with `--hardmode`. The v2 run used the dev9 checkout (`3.0.1.dev9+g2ad584631`, `Docker/tool-eval-bench/.venv`), whose Hard Mode adds **TC-89..TC-104** (16 scenarios, 32 points; modules hardmode_transactional/documents/expanded/governance). So the 95 run simply did not contain those 16; TC-01..TC-88 are identical IDs in both runs. Also recorded: `server_model_id` in the 95 run metadata says `DeepSeek-V4-Flash-0731-IQ2XXS-DS4` (stale id lookup in 2.7.0; requests went to GLM, the model field in config and report is GLM).
+
+### Is 95 comparable to 93? (fact + inference)
+
+- Fact: on the common TC-01..TC-88 the v2 run scored 166/176 versus 167/176 for v3, i.e. identical within one point. Five scenarios flipped each way (TC-21, 43, 52, 62, 68).
+- Fact: v2 on TC-89..104 scored 3 non-passes (TC-92 fail, TC-104 fail, TC-99 partial), so a like-for-like 104 score for v3 needs those 16 run.
+- Inference: 95 vs 93 is not a real difference; it is a different scenario set plus single-pass temp-0 noise. Not comparable as printed. A run of TC-89..104 on the same config is in progress (`/home/sparky/LLMs/glm53/overnight/v3b/`); combined score (two runs, computed) is not yet available when this was written.
+
+### Speed (llama-benchy 0.4.1.dev1 via `tool-eval-bench bench --perf-only`, pp2048 tg128, 3 runs)
+
+| Config | depth | c | pp tok/s | tg tok/s |
+|---|---|---|---|---|
+| 0.78, seqs 1 | 0 / 4096 / 8192 | 1 | 499 / 549 / 565 | 28.1 / 27.8 / 26.8 |
+| 0.76, seqs 2 | 0 / 4096 / 8192 | 2 | 309 / 427 / 484 | 19.1 / 18.8 / 17.6 |
+| 0.76, seqs 4 | 0 / 4096 / 8192 | 4 | 416 / 407 / 449 | 22.5 / 12.8 / 9.3 |
+| forum | - | 1 / 4 | 571 | 29.7 / 53.5 aggregate |
+
+c=1 reaches about 95 percent of the forum decode (28.1 vs 29.7) and 87-99 percent of prefill. No guard kill at seqs 2 or 4; min MemAvailable during these passes 6.0 GiB (seqs 4), 7.8 GiB (seqs 2), 10.3 GiB (seqs 1). Not verified whether llama-benchy's c>1 tg is per request or aggregate; the c=4 figures here are far below the forum's 53.5 aggregate if per-request, and would not match it if aggregate either, so no claim is made. These passes ran after the model had been reloaded, with the GPU free of other load.
+
+### Driver incident (fact)
+
+`driver.sh` could not run `dbq.py` (relative path, wrong cwd), so it parsed `done=0 status=none` after the finished run (rc 0) and logged `KILL #1 cause: bench ended with infra failures` at 13:37:22, then killed and relaunched GLM. That was a false positive. `status.txt` of that driver is unreliable (0/104, run id `-`). The driver was stopped by pid. The v3b runner uses the real run id from the DB and checkpoint counts.
